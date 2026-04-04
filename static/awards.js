@@ -268,7 +268,7 @@ function restoreFormState(formState) {
 }
 
 // Render awards form
-function renderAwardsForm(preserveFormState = false) {
+function renderAwardsForm(preserveFormState = false, focusAward = null) {
     const grid = document.getElementById('awards-grid');
     
     // Save current form state before re-rendering (only if preserving)
@@ -281,7 +281,8 @@ function renderAwardsForm(preserveFormState = false) {
     const inactiveTypes = AWARD_TYPES.filter(type => !activeAwardTypes.has(type)).sort();
     
     activeTypes.forEach(awardType => {
-        html += `<div class="award-card">`;
+        const focusClass = focusAward ? (awardType === focusAward ? 'focused' : 'unfocused') : '';
+        html += `<div class="award-card ${focusClass}" data-award="${escapeHtml(awardType)}">`;
         html += `<div class="award-header">`;
         html += `<h4 class="award-title">🏆 ${awardType}</h4>`;
         html += `<button class="toggle-award-btn" data-award="${awardType}" title="Hide this award">✕</button>`;
@@ -328,6 +329,23 @@ function renderAwardsForm(preserveFormState = false) {
         restoreFormState(formState);
     }
     
+    // Scroll to and focus on the newly activated award
+    if (focusAward) {
+        setTimeout(() => {
+            const focusedCard = document.querySelector(`.award-card[data-award="${focusAward.replace(/"/g, '\\"')}"]`);
+            if (focusedCard) {
+                focusedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            
+            // Remove focus classes after animation
+            setTimeout(() => {
+                document.querySelectorAll('.award-card').forEach(card => {
+                    card.classList.remove('focused', 'unfocused');
+                });
+            }, 2500);
+        }, 100);
+    }
+    
     // Setup toggle buttons
     document.querySelectorAll('.toggle-award-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -344,7 +362,7 @@ function renderAwardsForm(preserveFormState = false) {
             e.preventDefault();
             const award = e.target.dataset.award;
             activeAwardTypes.add(award);
-            renderAwardsForm(true); // Preserve form state when showing
+            renderAwardsForm(true, award); // Focus on the newly activated award
         });
     });
     
@@ -609,10 +627,16 @@ async function addNewAwardType(name) {
         });
         
         if (response.ok) {
+            // Preserve current active awards before reloading
+            const preservedActiveAwards = new Set(activeAwardTypes);
+            
             // Reload award types
             await loadAwardTypes();
-            activeAwardTypes.add(name.trim());
-            renderAwardsForm(true);
+            
+            // Restore all previously active awards plus the new one
+            activeAwardTypes = new Set([...preservedActiveAwards, name.trim()]);
+            
+            renderAwardsForm(true, name.trim()); // Focus on the new award
             document.getElementById('new-award-search').value = '';
             document.getElementById('award-suggestions').style.display = 'none';
             return true;
@@ -709,7 +733,7 @@ function setupAwardSearch() {
                     e.preventDefault();
                     const award = e.currentTarget.dataset.award;
                     activeAwardTypes.add(award);
-                    renderAwardsForm(true);
+                    renderAwardsForm(true, award); // Focus on the activated award
                     searchInput.value = '';
                     suggestionsDiv.style.display = 'none';
                 });
@@ -737,9 +761,15 @@ function setupAwardSearch() {
                         });
                         
                         if (response.ok) {
+                            // Preserve current active awards before reloading
+                            const preservedActiveAwards = new Set(activeAwardTypes);
+                            
                             await loadAwardTypes();
-                            activeAwardTypes.add(award);
-                            renderAwardsForm(true);
+                            
+                            // Restore all previously active awards plus the reactivated one
+                            activeAwardTypes = new Set([...preservedActiveAwards, award]);
+                            
+                            renderAwardsForm(true, award); // Focus on the reactivated award
                             searchInput.value = '';
                             suggestionsDiv.style.display = 'none';
                         } else {
@@ -772,7 +802,15 @@ function setupAwardSearch() {
                         });
                         
                         if (response.ok) {
+                            // Preserve current active awards before reloading (excluding deleted one)
+                            const preservedActiveAwards = new Set(activeAwardTypes);
+                            preservedActiveAwards.delete(awardName);
+                            
                             await loadAwardTypes();
+                            
+                            // Restore all previously active awards except the deleted one
+                            activeAwardTypes = preservedActiveAwards;
+                            
                             renderAwardsForm(true);
                             searchInput.value = '';
                             suggestionsDiv.style.display = 'none';
@@ -810,7 +848,7 @@ function setupAwardSearch() {
             if (exactMatch.active && !activeAwardTypes.has(exactMatch.name)) {
                 // Just activate in UI
                 activeAwardTypes.add(exactMatch.name);
-                renderAwardsForm(true);
+                renderAwardsForm(true, exactMatch.name); // Focus on the activated award
                 searchInput.value = '';
                 suggestionsDiv.style.display = 'none';
             } else if (!exactMatch.active) {
@@ -823,9 +861,15 @@ function setupAwardSearch() {
                     });
                     
                     if (response.ok) {
+                        // Preserve current active awards before reloading
+                        const preservedActiveAwards = new Set(activeAwardTypes);
+                        
                         await loadAwardTypes();
-                        activeAwardTypes.add(exactMatch.name);
-                        renderAwardsForm(true);
+                        
+                        // Restore all previously active awards plus the reactivated one
+                        activeAwardTypes = new Set([...preservedActiveAwards, exactMatch.name]);
+                        
+                        renderAwardsForm(true, exactMatch.name); // Focus on the reactivated award
                         searchInput.value = '';
                         suggestionsDiv.style.display = 'none';
                     }

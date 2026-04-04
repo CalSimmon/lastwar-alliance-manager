@@ -2466,8 +2466,22 @@ button {
     border: 2px solid var(--border-color);
     border-radius: 10px;
     padding: 20px;
-    transition: all 0.3s;
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
+}
+
+.award-card.focused {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2), var(--shadow-lg);
+    transform: scale(1.02);
+    z-index: 10;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+}
+
+.award-card.unfocused {
+    opacity: 0.4;
+    filter: grayscale(50%);
+    transform: scale(0.98);
 }
 
 .award-card:hover {
