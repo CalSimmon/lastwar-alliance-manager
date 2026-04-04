@@ -4524,9 +4524,15 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 		message := strings.ReplaceAll(template, "{NAME}", conductor)
 		message = strings.ReplaceAll(message, "{DAY}", dayName)
 		message = strings.ReplaceAll(message, "{DATE}", dateFormatted)
-
+		
 		// Replace time placeholders with dynamic timezone-aware times
 		conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, dateObj, settings)
+		message = strings.ReplaceAll(message, "{CONDUCTOR_TIME}", conductorTime)
+
+		messages = append(messages, DayMessage{
+			Day:     dayName,
+			Name:    conductor,
+			Message: message,
 		})
 	}
 
