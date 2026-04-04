@@ -185,6 +185,8 @@ type AdminUserResponse struct {
 
 type Settings struct {
 	ID                           int    `json:"id"`
+	AllianceName                 string `json:"alliance_name"`       // Full alliance name (e.g., "Reset Reapers")
+	AllianceShortName            string `json:"alliance_short_name"` // Short alliance tag (e.g., "RSRP")
 	AwardFirstPoints             int    `json:"award_first_points"`
 	AwardSecondPoints            int    `json:"award_second_points"`
 	AwardThirdPoints             int    `json:"award_third_points"`
@@ -1292,6 +1294,34 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added display_timezones column to settings table")
+	}
+
+	// Migrate settings table to add alliance_name column if missing
+	var allianceNameColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='alliance_name'
+	`).Scan(&allianceNameColumnExists)
+	if err != nil || !allianceNameColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN alliance_name TEXT NOT NULL DEFAULT 'Last War: Survival'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added alliance_name column to settings table")
+	}
+
+	// Migrate settings table to add alliance_short_name column if missing
+	var allianceShortNameColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='alliance_short_name'
+	`).Scan(&allianceShortNameColumnExists)
+	if err != nil || !allianceShortNameColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN alliance_short_name TEXT NOT NULL DEFAULT 'LWS'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added alliance_short_name column to settings table")
 	}
 
 	// Create default admin user if no users exist
@@ -3568,7 +3598,10 @@ func deleteDynoRecommendation(w http.ResponseWriter, r *http.Request) {
 // Get settings
 func getSettings(w http.ResponseWriter, r *http.Request) {
 	var settings Settings
-	err := db.QueryRow(`SELECT id, award_first_points, award_second_points, award_third_points, 
+	err := db.QueryRow(`SELECT id, 
+		COALESCE(alliance_name, 'Last War: Survival') as alliance_name,
+		COALESCE(alliance_short_name, 'LWS') as alliance_short_name,
+		award_first_points, award_second_points, award_third_points, 
 		recommendation_points, recent_conductor_penalty_days, above_average_conductor_penalty, r4r5_rank_boost,
 		first_time_conductor_boost, schedule_message_template, daily_message_template, 
 		COALESCE(power_tracking_enabled, 0) as power_tracking_enabled,
@@ -3578,6 +3611,8 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		COALESCE(display_timezones, '["Europe/London"]') as display_timezones
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
+		&settings.AllianceName,
+		&settings.AllianceShortName,
 		&settings.AwardFirstPoints,
 		&settings.AwardSecondPoints,
 		&settings.AwardThirdPoints,
@@ -3622,6 +3657,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(`UPDATE settings SET 
+		alliance_name = ?,
+		alliance_short_name = ?,
 		award_first_points = ?, 
 		award_second_points = ?, 
 		award_third_points = ?, 
@@ -3638,6 +3675,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		backup_time = ?,
 		display_timezones = ?
 		WHERE id = 1`,
+		settings.AllianceName,
+		settings.AllianceShortName,
 		settings.AwardFirstPoints,
 		settings.AwardSecondPoints,
 		settings.AwardThirdPoints,

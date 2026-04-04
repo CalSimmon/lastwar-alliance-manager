@@ -100,6 +100,10 @@ async function loadSettings() {
         
         const settings = await response.json();
         
+        // Alliance branding
+        document.getElementById('alliance-name').value = settings.alliance_name || 'Last War: Survival';
+        document.getElementById('alliance-short-name').value = settings.alliance_short_name || 'LWS';
+        
         document.getElementById('award-first').value = settings.award_first_points;
         document.getElementById('award-second').value = settings.award_second_points;
         document.getElementById('award-third').value = settings.award_third_points;
@@ -142,6 +146,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     }
     
     const settings = {
+        alliance_name: document.getElementById('alliance-name').value,
+        alliance_short_name: document.getElementById('alliance-short-name').value,
         award_first_points: parseInt(document.getElementById('award-first').value),
         award_second_points: parseInt(document.getElementById('award-second').value),
         award_third_points: parseInt(document.getElementById('award-third').value),
@@ -180,6 +186,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
 // Reset to defaults
 document.getElementById('reset-btn').addEventListener('click', () => {
     if (confirm('Reset all settings to default values?')) {
+        document.getElementById('alliance-name').value = 'Last War: Survival';
+        document.getElementById('alliance-short-name').value = 'LWS';
         document.getElementById('award-first').value = 3;
         document.getElementById('award-second').value = 2;
         document.getElementById('award-third').value = 1;
