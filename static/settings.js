@@ -204,8 +204,6 @@ document.getElementById('reset-btn').addEventListener('click', () => {
 
 // Power tracking toggle
 function togglePowerUploadSection(enabled) {
-// Power tracking toggle
-function togglePowerUploadSection(enabled) {
     const uploadLink = document.getElementById('power-upload-link');
     if (uploadLink) {
         uploadLink.style.display = enabled ? 'block' : 'none';
