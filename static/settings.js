@@ -103,6 +103,7 @@ async function loadSettings() {
         document.getElementById('award-first').value = settings.award_first_points;
         document.getElementById('award-second').value = settings.award_second_points;
         document.getElementById('award-third').value = settings.award_third_points;
+        document.getElementById('recommendation-points').value = settings.recommendation_points || 10;
         document.getElementById('recent-conductor-days').value = settings.recent_conductor_penalty_days;
         document.getElementById('above-average-penalty').value = settings.above_average_conductor_penalty;
         document.getElementById('r4r5-rank-boost').value = settings.r4r5_rank_boost;
@@ -145,17 +146,18 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         award_first_points: parseInt(document.getElementById('award-first').value),
         award_second_points: parseInt(document.getElementById('award-second').value),
         award_third_points: parseInt(document.getElementById('award-third').value),
+        recommendation_points: parseInt(document.getElementById('recommendation-points').value),
         recent_conductor_penalty_days: parseInt(document.getElementById('recent-conductor-days').value),
         above_average_conductor_penalty: parseInt(document.getElementById('above-average-penalty').value),
         r4r5_rank_boost: parseInt(document.getElementById('r4r5-rank-boost').value),
         first_time_conductor_boost: parseInt(document.getElementById('first-time-boost').value),
         schedule_message_template: document.getElementById('schedule-message-template').value,
         daily_message_template: document.getElementById('daily-message-template').value,
-        power_tracking_enabled: document.getElementById('power-tracking-e,
+        power_tracking_enabled: document.getElementById('power-tracking-enabled').checked,
+        server_timezone: document.getElementById('server-timezone').value,
         conductor_time: document.getElementById('conductor-time').value,
         backup_time: document.getElementById('backup-time').value,
-        display_timezones: JSON.stringify(currentTimezones)nabled').checked,
-        server_timezone: document.getElementById('server-timezone').value
+        display_timezones: JSON.stringify(currentTimezones)
     };
     
     try {
@@ -186,25 +188,31 @@ document.getElementById('reset-btn').addEventListener('click', () => {
         document.getElementById('recommendation-points').value = 10;
         document.getElementById('recent-conductor-days').value = 30;
         document.getElementById('above-average-penalty').value = 10;
-        document.getElementById('r4r5-rank-boost').value = 5;{CONDUCTOR_TIME} - Conductor {CONDUCTOR_NAME}, please request train assignment in alliance chat\n- {BACKUP_TIME} - If conductor hasn\'t shown up, Backup {BACKUP_NAME} takes over and assigns train to themselves\n\nRemember: Communication is key! Let the alliance know if you can\'t make it.\n\nAll aboard for another successful run!';
+        document.getElementById('r4r5-rank-boost').value = 5;
+        document.getElementById('first-time-boost').value = 5;
+        document.getElementById('schedule-message-template').value = 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}';
+        document.getElementById('daily-message-template').value = 'Daily train reminder for {DAY}, {DATE}:\\n🚂 Conductor: {CONDUCTOR} - Please be online at {CONDUCTOR_TIME}\\n🔄 Backup: {BACKUP} - Please be ready at {BACKUP_TIME}\\n\\nAsk in alliance chat for the train to be assigned. Thanks for keeping the train golden!';
         document.getElementById('server-timezone').value = 'Etc/GMT+2';
         document.getElementById('conductor-time').value = '15:00';
         document.getElementById('backup-time').value = '16:30';
         currentTimezones = ['Europe/London'];
         renderTimezoneTags();
-        updateTimePreview()
-        document.getElementById('schedule-message-template').value = 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}';
-        document.getElementById('daily-message-template').value = 'ALL ABOARD! Daily Train Assignment\n\nDate: {DATE}\n\nToday\'s Conductor: {CONDUCTOR_NAME} ({CONDUCTOR_RANK})\nBackup Engineer: {BACKUP_NAME} ({BACKUP_RANK})\n\nDEPARTURE SCHEDULE:\n- 15:00 ST (17:00 UK) - Conductor {CONDUCTOR_NAME}, please request train assignment in alliance chat\n- 16:30 ST (18:30 UK) - If conductor hasn\'t shown up, Backup {BACKUP_NAME} takes over and assigns train to themselves\n\nRemember: Communication is key! Let the alliance know if you can\'t make it.\n\nAll aboard for another successful run!';
-        document.getElementById('server-timezone').value = 'Etc/GMT+2';
+        updateTimePreview();
         document.getElementById('power-tracking-enabled').checked = false;
     }
 });
 
 // Power tracking toggle
 function togglePowerUploadSection(enabled) {
+// Power tracking toggle
+function togglePowerUploadSection(enabled) {
     const uploadLink = document.getElementById('power-upload-link');
     if (uploadLink) {
-   Timezone management
+        uploadLink.style.display = enabled ? 'block' : 'none';
+    }
+}
+
+// Timezone management
 function renderTimezoneTags() {
     const container = document.getElementById('timezone-tags');
     container.innerHTML = '';
@@ -272,10 +280,6 @@ function updateTimePreview() {
 
 document.getElementById('conductor-time').addEventListener('change', updateTimePreview);
 document.getElementById('backup-time').addEventListener('change', updateTimePreview);
-
-//      uploadLink.style.display = enabled ? 'block' : 'none';
-    }
-}
 
 document.getElementById('power-tracking-enabled').addEventListener('change', (e) => {
     togglePowerUploadSection(e.target.checked);
