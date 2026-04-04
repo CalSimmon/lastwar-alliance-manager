@@ -196,6 +196,10 @@ type Settings struct {
 	ScheduleMessageTemplate      string `json:"schedule_message_template"`
 	DailyMessageTemplate         string `json:"daily_message_template"`
 	PowerTrackingEnabled         bool   `json:"power_tracking_enabled"`
+	ServerTimezone               string `json:"server_timezone"`   // Game/Alliance timezone for date calculations
+	ConductorTime                string `json:"conductor_time"`    // Time for conductor in HH:MM format (e.g., "15:00")
+	BackupTime                   string `json:"backup_time"`       // Time for backup in HH:MM format (e.g., "16:30")
+	DisplayTimezones             string `json:"display_timezones"` // JSON array of timezones to display (e.g., ["Europe/London", "Europe/Paris"])
 }
 
 type MemberRanking struct {
@@ -442,7 +446,11 @@ func loadSettings() (Settings, error) {
 	var settings Settings
 	err := db.QueryRow(`SELECT id, award_first_points, award_second_points, award_third_points, 
 		recommendation_points, recent_conductor_penalty_days, above_average_conductor_penalty, r4r5_rank_boost,
-		first_time_conductor_boost, schedule_message_template, daily_message_template 
+		first_time_conductor_boost, schedule_message_template, daily_message_template,
+		COALESCE(server_timezone, 'UTC') as server_timezone,
+		COALESCE(conductor_time, '15:00') as conductor_time,
+		COALESCE(backup_time, '16:30') as backup_time,
+		COALESCE(display_timezones, '["Europe/London"]') as display_timezones
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AwardFirstPoints,
@@ -455,6 +463,10 @@ func loadSettings() (Settings, error) {
 		&settings.FirstTimeConductorBoost,
 		&settings.ScheduleMessageTemplate,
 		&settings.DailyMessageTemplate,
+		&settings.ServerTimezone,
+		&settings.ConductorTime,
+		&settings.BackupTime,
+		&settings.DisplayTimezones,
 	)
 	return settings, err
 }
@@ -1108,8 +1120,12 @@ func initDB() error {
 	if settingsCount == 0 {
 		_, err = db.Exec(`INSERT INTO settings (id, award_first_points, award_second_points, award_third_points, 
 			recommendation_points, recent_conductor_penalty_days, above_average_conductor_penalty, r4r5_rank_boost, 
-			first_time_conductor_boost, schedule_message_template) 
-			VALUES (1, 3, 2, 1, 10, 30, 10, 5, 5, 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}')`)
+			first_time_conductor_boost, schedule_message_template, server_timezone, conductor_time, backup_time, 
+			display_timezones, daily_message_template) 
+			VALUES (1, 3, 2, 1, 10, 30, 10, 5, 5, 
+			'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}', 
+			'Etc/GMT+2', '15:00', '16:30', '["Europe/London"]', 
+			'Daily train reminder for {DAY}, {DATE}:\n🚂 Conductor: {CONDUCTOR} - Please be online at {CONDUCTOR_TIME}\n🔄 Backup: {BACKUP} - Please be ready at {BACKUP_TIME}\n\nAsk in alliance chat for the train to be assigned. Thanks for keeping the train golden!')`)
 		if err != nil {
 			return err
 		}
@@ -1229,6 +1245,62 @@ All aboard for another successful run!`
 			return err
 		}
 		log.Println("Database migration: Added power_tracking_enabled column to settings table")
+	}
+
+	// Migrate settings table to add server_timezone column if missing
+	var timezoneColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='server_timezone'
+	`).Scan(&timezoneColumnExists)
+	if err != nil || !timezoneColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN server_timezone TEXT NOT NULL DEFAULT 'UTC'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added server_timezone column to settings table")
+	}
+
+	// Migrate settings table to add conductor_time column if missing
+	var conductorTimeColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='conductor_time'
+	`).Scan(&conductorTimeColumnExists)
+	if err != nil || !conductorTimeColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN conductor_time TEXT NOT NULL DEFAULT '15:00'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added conductor_time column to settings table")
+	}
+
+	// Migrate settings table to add backup_time column if missing
+	var backupTimeColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='backup_time'
+	`).Scan(&backupTimeColumnExists)
+	if err != nil || !backupTimeColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN backup_time TEXT NOT NULL DEFAULT '16:30'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added backup_time column to settings table")
+	}
+
+	// Migrate settings table to add display_timezones column if missing
+	var displayTimezonesColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('settings') 
+		WHERE name='display_timezones'
+	`).Scan(&displayTimezonesColumnExists)
+	if err != nil || !displayTimezonesColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN display_timezones TEXT NOT NULL DEFAULT '["Europe/London"]'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added display_timezones column to settings table")
 	}
 
 	// Create default admin user if no users exist
@@ -2531,14 +2603,40 @@ func autoSchedule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Helper function to parse date string
+// Helper function to get server location
+func getServerLocation() *time.Location {
+	settings, err := loadSettings()
+	if err != nil || settings.ServerTimezone == "" {
+		// Default to UTC if settings can't be loaded
+		loc, _ := time.LoadLocation("UTC")
+		return loc
+	}
+
+	loc, err := time.LoadLocation(settings.ServerTimezone)
+	if err != nil {
+		// Fall back to UTC if timezone is invalid
+		log.Printf("Warning: Invalid timezone '%s', falling back to UTC", settings.ServerTimezone)
+		loc, _ = time.LoadLocation("UTC")
+		return loc
+	}
+
+	return loc
+}
+
+// Helper function to get current time in game/alliance timezone
+func getServerTime() time.Time {
+	return time.Now().In(getServerLocation())
+}
+
+// Helper function to parse date string in game/alliance timezone
 func parseDate(dateStr string) (time.Time, error) {
-	return time.Parse("2006-01-02", dateStr)
+	loc := getServerLocation()
+	return time.ParseInLocation("2006-01-02", dateStr, loc)
 }
 
 // Helper function to format date to string
 func formatDateString(t time.Time) string {
-	return t.Format("2006-01-02")
+	return t.In(getServerLocation()).Format("2006-01-02")
 }
 
 // Helper function to get Monday of a week
@@ -2548,6 +2646,60 @@ func getMondayOfWeek(date time.Time) time.Time {
 		offset = -6
 	}
 	return date.AddDate(0, 0, offset)
+}
+
+// Helper function to format time across multiple timezones with DST support
+// baseTime is in HH:MM format (e.g., "15:00")
+// date is the reference date for DST calculation
+// Returns formatted string like "15:00 ST / 17:00 GMT / 18:00 CET"
+func formatTimeAcrossTimezones(baseTime string, date time.Time, settings Settings) string {
+	// Parse base time
+	timeParts := strings.Split(baseTime, ":")
+	if len(timeParts) != 2 {
+		return baseTime // Invalid format, return as-is
+	}
+
+	hour, err1 := strconv.Atoi(timeParts[0])
+	minute, err2 := strconv.Atoi(timeParts[1])
+	if err1 != nil || err2 != nil {
+		return baseTime // Invalid format, return as-is
+	}
+
+	// Create a time in the game timezone on the given date
+	gameLoc := getServerLocation()
+	gameTime := time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, gameLoc)
+
+	// Parse display timezones from JSON
+	var displayTimezones []string
+	if err := json.Unmarshal([]byte(settings.DisplayTimezones), &displayTimezones); err != nil {
+		// If parsing fails, use default
+		displayTimezones = []string{"Europe/London"}
+	}
+
+	// Build formatted string
+	var parts []string
+
+	// Add server time (ST) first
+	parts = append(parts, fmt.Sprintf("%s ST", baseTime))
+
+	// Add each display timezone
+	for _, tzName := range displayTimezones {
+		loc, err := time.LoadLocation(tzName)
+		if err != nil {
+			continue // Skip invalid timezones
+		}
+
+		// Convert game time to this timezone
+		timeInTz := gameTime.In(loc)
+
+		// Get timezone abbreviation (handles DST automatically)
+		tzAbbr := timeInTz.Format("MST")
+
+		// Format time
+		parts = append(parts, fmt.Sprintf("%02d:%02d %s", timeInTz.Hour(), timeInTz.Minute(), tzAbbr))
+	}
+
+	return strings.Join(parts, " / ")
 }
 
 // Import members from CSV
@@ -3428,7 +3580,11 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow(`SELECT id, award_first_points, award_second_points, award_third_points, 
 		recommendation_points, recent_conductor_penalty_days, above_average_conductor_penalty, r4r5_rank_boost,
 		first_time_conductor_boost, schedule_message_template, daily_message_template, 
-		COALESCE(power_tracking_enabled, 0) as power_tracking_enabled
+		COALESCE(power_tracking_enabled, 0) as power_tracking_enabled,
+		COALESCE(server_timezone, 'UTC') as server_timezone,
+		COALESCE(conductor_time, '15:00') as conductor_time,
+		COALESCE(backup_time, '16:30') as backup_time,
+		COALESCE(display_timezones, '["Europe/London"]') as display_timezones
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AwardFirstPoints,
@@ -3442,6 +3598,10 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		&settings.ScheduleMessageTemplate,
 		&settings.DailyMessageTemplate,
 		&settings.PowerTrackingEnabled,
+		&settings.ServerTimezone,
+		&settings.ConductorTime,
+		&settings.BackupTime,
+		&settings.DisplayTimezones,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3460,6 +3620,16 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate timezone
+	if settings.ServerTimezone != "" {
+		if _, err := time.LoadLocation(settings.ServerTimezone); err != nil {
+			http.Error(w, "Invalid timezone: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		settings.ServerTimezone = "UTC"
+	}
+
 	_, err := db.Exec(`UPDATE settings SET 
 		award_first_points = ?, 
 		award_second_points = ?, 
@@ -3471,7 +3641,11 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		first_time_conductor_boost = ?,
 		schedule_message_template = ?,
 		daily_message_template = ?,
-		power_tracking_enabled = ?
+		power_tracking_enabled = ?,
+		server_timezone = ?,
+		conductor_time = ?,
+		backup_time = ?,
+		display_timezones = ?
 		WHERE id = 1`,
 		settings.AwardFirstPoints,
 		settings.AwardSecondPoints,
@@ -3484,6 +3658,10 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.ScheduleMessageTemplate,
 		settings.DailyMessageTemplate,
 		settings.PowerTrackingEnabled,
+		settings.ServerTimezone,
+		settings.ConductorTime,
+		settings.BackupTime,
+		settings.DisplayTimezones,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3499,7 +3677,7 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 	// Always include all awards (active and inactive) - filtering is done on client side
 
 	// Build ranking context using current date
-	now := time.Now()
+	now := getServerTime()
 	ctx, err := buildRankingContext(now)
 	if err != nil {
 		http.Error(w, "Failed to load ranking context: "+err.Error(), http.StatusInternalServerError)
@@ -3710,7 +3888,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate start date (N months ago from today)
-	now := time.Now()
+	now := getServerTime()
 	startDate := now.AddDate(0, -months, 0)
 
 	// Get all members
@@ -4256,6 +4434,12 @@ func generateDailyMessage(w http.ResponseWriter, r *http.Request) {
 	message = strings.ReplaceAll(message, "{BACKUP_NAME}", backupName)
 	message = strings.ReplaceAll(message, "{BACKUP_RANK}", backupRank)
 
+	// Replace dynamic time variables
+	conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, date, settings)
+	backupTime := formatTimeAcrossTimezones(settings.BackupTime, date, settings)
+	message = strings.ReplaceAll(message, "{CONDUCTOR_TIME}", conductorTime)
+	message = strings.ReplaceAll(message, "{BACKUP_TIME}", backupTime)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": message,
@@ -4295,13 +4479,13 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Message variations for natural variety
 	messageTemplates := []string{
-		"Hi {NAME}! Just a reminder that you're the train conductor on {DAY}, {DATE}. Please be online around 15:00 ST / 17:00 UK / 18:00 CET and ask in alliance chat for the train to be assigned to you. If anything comes up, let us know early so we can coordinate with the backup. Please add a reminder in your phone so you don't forget. Thanks for helping keep the train golden!",
-		"Hi {NAME}! You're scheduled as train conductor on {DAY}, {DATE}. Please be online at 15:00 ST / 17:00 UK / 18:00 CET and request the train in alliance chat. If your schedule changes, let us know in advance so we can coordinate with the backup. Add a reminder in your phone to make sure you're on time. Appreciate your support!",
-		"Hi {NAME}! Just a heads-up that you're the train conductor on {DAY}, {DATE}. Please be online around 15:00 ST / 17:00 UK / 18:00 CET and ask for the train in alliance chat. If you need help or need to swap, reach out early. Set a phone reminder so you don't miss it. Thanks a lot!",
-		"Hi {NAME}! You're assigned as train conductor on {DAY}, {DATE}. Please be online at 15:00 ST / 17:00 UK / 18:00 CET and request the train in alliance chat. If there are any timing issues, let us know so we can plan with the backup. Don't forget to add a reminder in your phone. Thanks for stepping up!",
-		"Hi {NAME}! Reminder that you're the train conductor on {DAY}, {DATE}. Please be online around 15:00 ST / 17:00 UK / 18:00 CET and ask in alliance chat for the train assignment. Let us know early if anything changes. Make sure to set a phone reminder. Much appreciated!",
-		"Hi {NAME}! You're scheduled as train conductor on {DAY}, {DATE}. Please be online at 15:00 ST / 17:00 UK / 18:00 CET and request the train in alliance chat. If you need assistance or a timing adjustment, just let us know. Add a phone reminder to help you remember. Thanks!",
-		"Hi {NAME}! Just a reminder that you're the train conductor on {DAY}, {DATE}. Please be online around 15:00 ST / 17:00 UK / 18:00 CET and ask in alliance chat for the train to be assigned. If anything comes up, please reach out early. Set a reminder in your phone so you're prepared. Thanks for helping the alliance!",
+		"Hi {NAME}! Just a reminder that you're the train conductor on {DAY}, {DATE}. Please be online around {CONDUCTOR_TIME} and ask in alliance chat for the train to be assigned to you. If anything comes up, let us know early so we can coordinate with the backup. Please add a reminder in your phone so you don't forget. Thanks for helping keep the train golden!",
+		"Hi {NAME}! You're scheduled as train conductor on {DAY}, {DATE}. Please be online at {CONDUCTOR_TIME} and request the train in alliance chat. If your schedule changes, let us know in advance so we can coordinate with the backup. Add a reminder in your phone to make sure you're on time. Appreciate your support!",
+		"Hi {NAME}! Just a heads-up that you're the train conductor on {DAY}, {DATE}. Please be online around {CONDUCTOR_TIME} and ask for the train in alliance chat. If you need help or need to swap, reach out early. Set a phone reminder so you don't miss it. Thanks a lot!",
+		"Hi {NAME}! You're assigned as train conductor on {DAY}, {DATE}. Please be online at {CONDUCTOR_TIME} and request the train in alliance chat. If there are any timing issues, let us know so we can plan with the backup. Don't forget to add a reminder in your phone. Thanks for stepping up!",
+		"Hi {NAME}! Reminder that you're the train conductor on {DAY}, {DATE}. Please be online around {CONDUCTOR_TIME} and ask in alliance chat for the train assignment. Let us know early if anything changes. Make sure to set a phone reminder. Much appreciated!",
+		"Hi {NAME}! You're scheduled as train conductor on {DAY}, {DATE}. Please be online at {CONDUCTOR_TIME} and request the train in alliance chat. If you need assistance or a timing adjustment, just let us know. Add a phone reminder to help you remember. Thanks!",
+		"Hi {NAME}! Just a reminder that you're the train conductor on {DAY}, {DATE}. Please be online around {CONDUCTOR_TIME} and ask in alliance chat for the train to be assigned. If anything comes up, please reach out early. Set a reminder in your phone so you're prepared. Thanks for helping the alliance!",
 	}
 
 	type DayMessage struct {
@@ -4333,6 +4517,10 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 		message := strings.ReplaceAll(template, "{NAME}", conductor)
 		message = strings.ReplaceAll(message, "{DAY}", dayName)
 		message = strings.ReplaceAll(message, "{DATE}", dateFormatted)
+
+		// Replace time placeholders with dynamic timezone-aware times
+		conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, date, settings)
+		message = strings.ReplaceAll(message, "{CONDUCTOR_TIME}", conductorTime)
 
 		messages = append(messages, DayMessage{
 			Day:     dayName,
@@ -5405,7 +5593,7 @@ func extractVSPointsDataFromImage(imageData []byte) (day string, records []struc
 	// If we didn't detect day from tab region, try text-based detection as fallback
 	if detectedDay == "" {
 		// Use current system day as last resort
-		now := time.Now()
+		now := getServerTime()
 		weekday := now.Weekday()
 		switch weekday {
 		case time.Monday:
@@ -5821,7 +6009,7 @@ func processVSPointsScreenshot(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Determine the week date based on the week parameter
-		now := time.Now()
+		now := getServerTime()
 		if weekParam == "last" {
 			// Subtract 7 days to get last week
 			now = now.AddDate(0, 0, -7)
@@ -5868,7 +6056,7 @@ func processVSPointsScreenshot(w http.ResponseWriter, r *http.Request) {
 		if weekParam == "" {
 			weekParam = "current"
 		}
-		now := time.Now()
+		now := getServerTime()
 		if weekParam == "last" {
 			// Subtract 7 days to get last week
 			now = now.AddDate(0, 0, -7)

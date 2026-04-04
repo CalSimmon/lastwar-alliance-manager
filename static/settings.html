@@ -133,6 +133,160 @@
                     </div>
 
                     <div class="settings-group">
+                        <h4>🌍 Game/Alliance Timezone</h4>
+                        <div class="form-group">
+                            <label for="server-timezone">Timezone:</label>
+                            <select id="server-timezone" required>
+                                <option value="UTC">UTC (Coordinated Universal Time)</option>
+                                <optgroup label="Fixed GMT Offsets">
+                                    <option value="Etc/GMT+12">GMT-12 (Baker Island)</option>
+                                    <option value="Etc/GMT+11">GMT-11 (American Samoa)</option>
+                                    <option value="Etc/GMT+10">GMT-10 (Hawaii)</option>
+                                    <option value="Etc/GMT+9">GMT-9 (Alaska)</option>
+                                    <option value="Etc/GMT+8">GMT-8 (Pacific Time)</option>
+                                    <option value="Etc/GMT+7">GMT-7 (Mountain Time)</option>
+                                    <option value="Etc/GMT+6">GMT-6 (Central Time)</option>
+                                    <option value="Etc/GMT+5">GMT-5 (Eastern Time)</option>
+                                    <option value="Etc/GMT+4">GMT-4 (Atlantic Time)</option>
+                                    <option value="Etc/GMT+3">GMT-3 (Brazil)</option>
+                                    <option value="Etc/GMT+2">GMT-2 (Mid-Atlantic)</option>
+                                    <option value="Etc/GMT+1">GMT-1 (Azores)</option>
+                                    <option value="Etc/GMT-1">GMT+1 (Central European)</option>
+                                    <option value="Etc/GMT-2">GMT+2 (Eastern European)</option>
+                                    <option value="Etc/GMT-3">GMT+3 (Moscow, East Africa)</option>
+                                    <option value="Etc/GMT-4">GMT+4 (Dubai)</option>
+                                    <option value="Etc/GMT-5">GMT+5 (Pakistan)</option>
+                                    <option value="Etc/GMT-6">GMT+6 (Bangladesh)</option>
+                                    <option value="Etc/GMT-7">GMT+7 (Bangkok)</option>
+                                    <option value="Etc/GMT-8">GMT+8 (China, Singapore)</option>
+                                    <option value="Etc/GMT-9">GMT+9 (Japan, Korea)</option>
+                                    <option value="Etc/GMT-10">GMT+10 (Sydney)</option>
+                                    <option value="Etc/GMT-11">GMT+11 (Solomon Islands)</option>
+                                    <option value="Etc/GMT-12">GMT+12 (New Zealand)</option>
+                                </optgroup>
+                                <optgroup label="Europe (with DST)">
+                                    <option value="Europe/London">Europe/London (UK, GMT/BST)</option>
+                                    <option value="Europe/Dublin">Europe/Dublin (Ireland)</option>
+                                    <option value="Europe/Paris">Europe/Paris (France, CET/CEST)</option>
+                                    <option value="Europe/Berlin">Europe/Berlin (Germany, CET/CEST)</option>
+                                    <option value="Europe/Rome">Europe/Rome (Italy, CET/CEST)</option>
+                                    <option value="Europe/Madrid">Europe/Madrid (Spain, CET/CEST)</option>
+                                    <option value="Europe/Amsterdam">Europe/Amsterdam (Netherlands, CET/CEST)</option>
+                                    <option value="Europe/Brussels">Europe/Brussels (Belgium, CET/CEST)</option>
+                                    <option value="Europe/Warsaw">Europe/Warsaw (Poland, CET/CEST)</option>
+                                    <option value="Europe/Athens">Europe/Athens (Greece, EET/EEST)</option>
+                                    <option value="Europe/Bucharest">Europe/Bucharest (Romania, EET/EEST)</option>
+                                    <option value="Europe/Helsinki">Europe/Helsinki (Finland, EET/EEST)</option>
+                                    <option value="Europe/Istanbul">Europe/Istanbul (Turkey, TRT)</option>
+                                    <option value="Europe/Moscow">Europe/Moscow (Russia, MSK)</option>
+                                </optgroup>
+                                <optgroup label="Americas (with DST)">
+                                    <option value="America/New_York">America/New_York (US Eastern)</option>
+                                    <option value="America/Chicago">America/Chicago (US Central)</option>
+                                    <option value="America/Denver">America/Denver (US Mountain)</option>
+                                    <option value="America/Phoenix">America/Phoenix (US Arizona, no DST)</option>
+                                    <option value="America/Los_Angeles">America/Los_Angeles (US Pacific)</option>
+                                    <option value="America/Anchorage">America/Anchorage (US Alaska)</option>
+                                    <option value="America/Honolulu">America/Honolulu (US Hawaii, no DST)</option>
+                                    <option value="America/Toronto">America/Toronto (Canada Eastern)</option>
+                                    <option value="America/Vancouver">America/Vancouver (Canada Pacific)</option>
+                                    <option value="America/Mexico_City">America/Mexico_City (Mexico)</option>
+                                    <option value="America/Sao_Paulo">America/Sao_Paulo (Brazil)</option>
+                                    <option value="America/Argentina/Buenos_Aires">America/Argentina/Buenos_Aires (Argentina)</option>
+                                </optgroup>
+                                <optgroup label="Asia (with/without DST)">
+                                    <option value="Asia/Dubai">Asia/Dubai (UAE, GST)</option>
+                                    <option value="Asia/Kolkata">Asia/Kolkata (India, IST)</option>
+                                    <option value="Asia/Bangkok">Asia/Bangkok (Thailand, ICT)</option>
+                                    <option value="Asia/Singapore">Asia/Singapore (Singapore, SGT)</option>
+                                    <option value="Asia/Hong_Kong">Asia/Hong_Kong (Hong Kong, HKT)</option>
+                                    <option value="Asia/Shanghai">Asia/Shanghai (China, CST)</option>
+                                    <option value="Asia/Tokyo">Asia/Tokyo (Japan, JST)</option>
+                                    <option value="Asia/Seoul">Asia/Seoul (South Korea, KST)</option>
+                                    <option value="Asia/Manila">Asia/Manila (Philippines, PHT)</option>
+                                    <option value="Asia/Jakarta">Asia/Jakarta (Indonesia, WIB)</option>
+                                </optgroup>
+                                <optgroup label="Australia & Pacific (with DST)">
+                                    <option value="Australia/Sydney">Australia/Sydney (AEDT/AEST)</option>
+                                    <option value="Australia/Melbourne">Australia/Melbourne (AEDT/AEST)</option>
+                                    <option value="Australia/Brisbane">Australia/Brisbane (AEST, no DST)</option>
+                                    <option value="Australia/Perth">Australia/Perth (AWST, no DST)</option>
+                                    <option value="Pacific/Auckland">Pacific/Auckland (New Zealand, NZDT/NZST)</option>
+                                </optgroup>
+                                <optgroup label="Africa (mostly no DST)">
+                                    <option value="Africa/Cairo">Africa/Cairo (Egypt, EET)</option>
+                                    <option value="Africa/Johannesburg">Africa/Johannesburg (South Africa, SAST, GMT+2)</option>
+                                    <option value="Africa/Lagos">Africa/Lagos (Nigeria, WAT)</option>
+                                </optgroup>
+                            </select>
+                            <span class="help-text">⚠️ <strong>Important:</strong> This is the timezone for your game/alliance operations (e.g., GMT-2 for your game server time), NOT your physical server's location. All dates and schedules will be calculated in this timezone. Use fixed GMT offsets if your game doesn't observe DST.</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
+                        <h4>⏰ Train Schedule Times</h4>
+                        <div class="form-group">
+                            <label for="conductor-time">Conductor Time (Game Timezone):</label>
+                            <input type="time" id="conductor-time" required>
+                            <span class="help-text">Time when the conductor should request the train (in game timezone, e.g., 15:00)</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="backup-time">Backup Time (Game Timezone):</label>
+                            <input type="time" id="backup-time" required>
+                            <span class="help-text">Time when the backup should take over if conductor doesn't show (e.g., 16:30)</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
+                        <h4>🌐 Time Display Configuration</h4>
+                        <div class="form-group">
+                            <label>Additional Timezones to Display:</label>
+                            <div id="timezone-tags" class="timezone-tags"></div>
+                            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                <select id="timezone-selector" style="flex: 1;">
+                                    <option value="">-- Select timezone to add --</option>
+                                    <optgroup label="Europe">
+                                        <option value="Europe/London">Europe/London (GMT/BST)</option>
+                                        <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+                                        <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
+                                        <option value="Europe/Rome">Europe/Rome (CET/CEST)</option>
+                                        <option value="Europe/Madrid">Europe/Madrid (CET/CEST)</option>
+                                        <option value="Europe/Athens">Europe/Athens (EET/EEST)</option>
+                                        <option value="Europe/Moscow">Europe/Moscow (MSK)</option>
+                                    </optgroup>
+                                    <optgroup label="Americas">
+                                        <option value="America/New_York">America/New_York (EST/EDT)</option>
+                                        <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+                                        <option value="America/Denver">America/Denver (MST/MDT)</option>
+                                        <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+                                        <option value="America/Toronto">America/Toronto (EST/EDT)</option>
+                                    </optgroup>
+                                    <optgroup label="Asia">
+                                        <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                                        <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+                                        <option value="Asia/Hong_Kong">Asia/Hong_Kong (HKT)</option>
+                                        <option value="Asia/Shanghai">Asia/Shanghai (CST)</option>
+                                        <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                                        <option value="Asia/Seoul">Asia/Seoul (KST)</option>
+                                    </optgroup>
+                                    <optgroup label="Australia">
+                                        <option value="Australia/Sydney">Australia/Sydney (AEDT/AEST)</option>
+                                        <option value="Pacific/Auckland">Pacific/Auckland (NZDT/NZST)</option>
+                                    </optgroup>
+                                </select>
+                                <button type="button" id="add-timezone-btn" class="secondary-btn">Add</button>
+                            </div>
+                            <span class="help-text">
+                                Select additional timezones to display in messages. Times will automatically adjust for daylight saving time.<br>
+                                Example: <code>15:00 ST / 17:00 GMT / 18:00 CET</code>
+                            </span>
+                            <div style="margin-top: 15px; padding: 10px; background: var(--card-bg); border-radius: 4px;">
+                                <strong>Preview:</strong> <span id="time-preview">Configure times above to see preview</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
                         <h4>📝 Weekly Schedule Message Template</h4>
                         <div class="form-group">
                             <label for="schedule-message-template">Message Template:</label>
@@ -157,7 +311,9 @@
                                 <code>{CONDUCTOR_NAME}</code> = Conductor's name<br>
                                 <code>{CONDUCTOR_RANK}</code> = Conductor's rank<br>
                                 <code>{BACKUP_NAME}</code> = Backup's name<br>
-                                <code>{BACKUP_RANK}</code> = Backup's rank
+                                <code>{BACKUP_RANK}</code> = Backup's rank<br>
+                                <code>{CONDUCTOR_TIME}</code> = Conductor time (auto-formatted across timezones with DST)<br>
+                                <code>{BACKUP_TIME}</code> = Backup time (auto-formatted across timezones with DST)
                             </span>
                         </div>
                     </div>
