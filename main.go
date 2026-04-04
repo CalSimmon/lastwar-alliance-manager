@@ -4454,6 +4454,13 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load settings for timezone configuration
+	settings, err := loadSettings()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	// Parse start date
 	weekStart, err := parseDate(startDate)
 	if err != nil {
@@ -4519,13 +4526,7 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 		message = strings.ReplaceAll(message, "{DATE}", dateFormatted)
 
 		// Replace time placeholders with dynamic timezone-aware times
-		conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, date, settings)
-		message = strings.ReplaceAll(message, "{CONDUCTOR_TIME}", conductorTime)
-
-		messages = append(messages, DayMessage{
-			Day:     dayName,
-			Name:    conductor,
-			Message: message,
+		conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, dateObj, settings)
 		})
 	}
 
