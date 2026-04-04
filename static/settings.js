@@ -108,7 +108,7 @@ async function loadSettings() {
         document.getElementById('r4r5-rank-boost').value = settings.r4r5_rank_boost;
         document.getElementById('first-time-boost').value = settings.first_time_conductor_boost || 5;
         document.getElementById('schedule-message-template').value = settings.schedule_message_template || 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}';
-        document.getElementById('daily-message-template').value = settings.daily_message_template || 'ALL ABOARD! Daily Train Assignment\n\nDate: {DATE}\n\nToday\'s Conductor: {CONDUCTOR_NAME} ({CONDUCTOR_RANK})\nBackup Engineer: {BACKUP_NAME} ({BACKUP_RANK})\n\nDEPARTURE SCHEDULE:\n- 15:00 ST (17:00 UK) - Conductor {CONDUCTOR_NAME}, please request train assignment in alliance chat\n- 16:30 ST (18:30 UK) - If conductor hasn\'t shown up, Backup {BACKUP_NAME} takes over and assigns train to themselves\n\nRemember: Communication is key! Let the alliance know if you can\'t make it.\n\nAll aboard for another successful run!';
+        document.getElementById('daily-message-template').value = settings.daily_message_template || 'Daily train reminder for {DAY}, {DATE}:\n🚂 Conductor: {CONDUCTOR_NAME} - Please be online at {CONDUCTOR_TIME}\n🔄 Backup: {BACKUP_NAME} - Please be ready at {BACKUP_TIME}\n\nAsk in alliance chat for the train to be assigned. Thanks for keeping the train golden!';
         
         // Server timezone
         document.getElementById('server-timezone').value = settings.server_timezone || 'UTC';

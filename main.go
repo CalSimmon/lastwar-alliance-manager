@@ -1206,20 +1206,11 @@ Next in line:
 	}
 
 	if !dailyTemplateColumnExists {
-		defaultDailyTemplate := `ALL ABOARD! Daily Train Assignment
+		defaultDailyTemplate := `Daily train reminder for {DAY}, {DATE}:
+🚂 Conductor: {CONDUCTOR_NAME} - Please be online at {CONDUCTOR_TIME}
+🔄 Backup: {BACKUP_NAME} - Please be ready at {BACKUP_TIME}
 
-Date: {DATE}
-
-Today's Conductor: {CONDUCTOR_NAME} ({CONDUCTOR_RANK})
-Backup Engineer: {BACKUP_NAME} ({BACKUP_RANK})
-
-DEPARTURE SCHEDULE:
-- 15:00 ST (17:00 UK) - Conductor {CONDUCTOR_NAME}, please request train assignment in alliance chat
-- 16:30 ST (18:30 UK) - If conductor hasn't shown up, Backup {BACKUP_NAME} takes over and assigns train to themselves
-
-Remember: Communication is key! Let the alliance know if you can't make it.
-
-All aboard for another successful run!`
+Ask in alliance chat for the train to be assigned. Thanks for keeping the train golden!`
 		// Add column without default first
 		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN daily_message_template TEXT`)
 		if err != nil {
@@ -4524,7 +4515,7 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 		message := strings.ReplaceAll(template, "{NAME}", conductor)
 		message = strings.ReplaceAll(message, "{DAY}", dayName)
 		message = strings.ReplaceAll(message, "{DATE}", dateFormatted)
-		
+
 		// Replace time placeholders with dynamic timezone-aware times
 		conductorTime := formatTimeAcrossTimezones(settings.ConductorTime, dateObj, settings)
 		message = strings.ReplaceAll(message, "{CONDUCTOR_TIME}", conductorTime)
