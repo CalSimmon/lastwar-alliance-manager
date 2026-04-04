@@ -199,6 +199,7 @@ button {
     background: var(--container-bg);
     display: flex;
     flex-direction: column;
+    overflow-x: hidden;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -544,15 +545,17 @@ header .user-info {
 main {
     padding: 2rem 3rem;
     flex: 1;
-    width: 100%;
+    width: calc(100% - 260px);
     background: var(--container-bg);
     margin-left: 260px;
-    transition: margin-left var(--transition-base);
+    transition: margin-left var(--transition-base), width var(--transition-base);
     min-height: calc(100vh - 160px);
+    box-sizing: border-box;
 }
 
 main.sidebar-collapsed {
     margin-left: 0;
+    width: 100%;
 }
 
 @media (max-width: 1024px) {
@@ -1257,10 +1260,12 @@ button {
     main {
         margin-left: 0;
         padding: 1rem 1.5rem;
+        width: 100%;
     }
 
     main.sidebar-collapsed {
         margin-left: 0;
+        width: 100%;
     }
 
     /* Main content */
