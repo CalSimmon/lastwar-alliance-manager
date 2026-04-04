@@ -103,7 +103,6 @@ async function loadSettings() {
         document.getElementById('award-first').value = settings.award_first_points;
         document.getElementById('award-second').value = settings.award_second_points;
         document.getElementById('award-third').value = settings.award_third_points;
-        document.getElementById('recommendation-points').value = settings.recommendation_points || 10;
         document.getElementById('recent-conductor-days').value = settings.recent_conductor_penalty_days;
         document.getElementById('above-average-penalty').value = settings.above_average_conductor_penalty;
         document.getElementById('r4r5-rank-boost').value = settings.r4r5_rank_boost;
@@ -146,7 +145,6 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         award_first_points: parseInt(document.getElementById('award-first').value),
         award_second_points: parseInt(document.getElementById('award-second').value),
         award_third_points: parseInt(document.getElementById('award-third').value),
-        recommendation_points: parseInt(document.getElementById('recommendation-points').value),
         recent_conductor_penalty_days: parseInt(document.getElementById('recent-conductor-days').value),
         above_average_conductor_penalty: parseInt(document.getElementById('above-average-penalty').value),
         r4r5_rank_boost: parseInt(document.getElementById('r4r5-rank-boost').value),
@@ -185,7 +183,6 @@ document.getElementById('reset-btn').addEventListener('click', () => {
         document.getElementById('award-first').value = 3;
         document.getElementById('award-second').value = 2;
         document.getElementById('award-third').value = 1;
-        document.getElementById('recommendation-points').value = 10;
         document.getElementById('recent-conductor-days').value = 30;
         document.getElementById('above-average-penalty').value = 10;
         document.getElementById('r4r5-rank-boost').value = 5;
