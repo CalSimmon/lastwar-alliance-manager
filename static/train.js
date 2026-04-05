@@ -421,7 +421,14 @@ function renderScheduleGrid() {
             html += `<div class="backup">`;
             html += `<strong>Backup:</strong><br>${escapeHtml(schedule.backup_name)} (${schedule.backup_rank})`;
             if (schedule.conductor_showed_up === false) {
-                html += ' <span class="status-badge active">🚂 Stepped in</span>';
+                if (schedule.actual_conductor_id) {
+                    // Backup assigned to someone else
+                    html += ' <span class="status-badge info">📋 Assigned to:</span>';
+                    html += `<br><strong>${escapeHtml(schedule.actual_conductor_name)}</strong>`;
+                } else {
+                    // Backup conducted it themselves
+                    html += ' <span class="status-badge active">🚂 Stepped in</span>';
+                }
             }
             html += `</div>`;
             if (schedule.notes) {
@@ -471,6 +478,7 @@ function openScheduleModal(dateStr) {
     // Reset search inputs
     document.getElementById('conductor-search').value = '';
     document.getElementById('backup-search').value = '';
+    document.getElementById('actual-conductor-search').value = '';
     
     // Populate conductor select
     populateConductorSelect(allMembers, schedule);
@@ -478,19 +486,41 @@ function openScheduleModal(dateStr) {
     // Populate backup select (R4 and R5 only)
     populateBackupSelect(backupMembers, schedule);
     
+    // Populate actual conductor select (all members)
+    populateActualConductorSelect(allMembers, schedule);
+    
     // Setup search filters
     setupDropdownSearch();
     
     // Show/hide attendance group
     const attendanceGroup = document.getElementById('attendance-group');
+    const actualConductorGroup = document.getElementById('actual-conductor-group');
+    const actualConductorSelectGroup = document.getElementById('actual-conductor-select-group');
     const dateObj = new Date(dateStr + 'T00:00:00');
     const today = new Date(new Date().setHours(0, 0, 0, 0));
     const isNotFuture = dateObj <= today;
+    
+    // Hide actual conductor groups by default
+    actualConductorGroup.style.display = 'none';
+    actualConductorSelectGroup.style.display = 'none';
     
     if (isNotFuture && schedule) {
         attendanceGroup.style.display = 'block';
         if (schedule.conductor_showed_up !== null) {
             document.querySelector(`input[name="attendance"][value="${schedule.conductor_showed_up ? 'yes' : 'no'}"]`).checked = true;
+            
+            // If conductor didn't show up, show actual conductor options
+            if (schedule.conductor_showed_up === false) {
+                actualConductorGroup.style.display = 'block';
+                if (schedule.actual_conductor_id) {
+                    // Someone else was assigned
+                    document.querySelector('input[name="actual-conductor-option"][value="other"]').checked = true;
+                    actualConductorSelectGroup.style.display = 'block';
+                } else {
+                    // Backup conducted it
+                    document.querySelector('input[name="actual-conductor-option"][value="backup"]').checked = true;
+                }
+            }
         }
     } else {
         attendanceGroup.style.display = 'none';
@@ -500,6 +530,9 @@ function openScheduleModal(dateStr) {
     if (schedule && schedule.notes) {
         document.getElementById('notes').value = schedule.notes;
     }
+    
+    // Setup attendance change handler
+    setupAttendanceHandlers();
     
     document.getElementById('modal-title').textContent = schedule ? 'Edit Schedule' : 'Schedule Train';
     modal.style.display = 'flex';
@@ -575,12 +608,78 @@ function populateBackupSelect(members, schedule) {
     });
 }
 
+// Populate actual conductor select (shown when backup assigns to someone else)
+function populateActualConductorSelect(members, schedule) {
+    const actualConductorSelect = document.getElementById('actual-conductor-select');
+    actualConductorSelect.innerHTML = '';
+    
+    members.forEach(member => {
+        const option = document.createElement('option');
+        option.value = member.id;
+        
+        // Build option text with stats
+        let optionText = `${member.name} (${member.rank})`;
+        const stats = memberStats[member.id];
+        if (stats && stats.actual_conductor_count > 0) {
+            optionText += ` - assigned ${stats.actual_conductor_count}x`;
+        }
+        
+        option.textContent = optionText;
+        option.dataset.name = member.name.toLowerCase();
+        if (schedule && schedule.actual_conductor_id && member.id === schedule.actual_conductor_id) {
+            option.selected = true;
+        }
+        actualConductorSelect.appendChild(option);
+    });
+}
+
+// Setup handlers for attendance radio buttons
+function setupAttendanceHandlers() {
+    const attendanceRadios = document.querySelectorAll('input[name="attendance"]');
+    const actualConductorGroup = document.getElementById('actual-conductor-group');
+    const actualConductorSelectGroup = document.getElementById('actual-conductor-select-group');
+    const actualConductorOptionRadios = document.querySelectorAll('input[name="actual-conductor-option"]');
+    
+    // Handle attendance change
+    attendanceRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'no') {
+                // Conductor didn't show up - show who conducted options
+                actualConductorGroup.style.display = 'block';
+                // Default to backup conducted it
+                if (!document.querySelector('input[name="actual-conductor-option"]:checked')) {
+                    document.querySelector('input[name="actual-conductor-option"][value="backup"]').checked = true;
+                }
+            } else {
+                // Conductor showed up - hide actual conductor options
+                actualConductorGroup.style.display = 'none';
+                actualConductorSelectGroup.style.display = 'none';
+            }
+        });
+    });
+    
+    // Handle actual conductor option change
+    actualConductorOptionRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'other') {
+                // Show member selection dropdown
+                actualConductorSelectGroup.style.display = 'block';
+            } else {
+                // Hide member selection dropdown
+                actualConductorSelectGroup.style.display = 'none';
+            }
+        });
+    });
+}
+
 // Setup dropdown search functionality
 function setupDropdownSearch() {
     const conductorSearch = document.getElementById('conductor-search');
     const conductorSelect = document.getElementById('conductor-select');
     const backupSearch = document.getElementById('backup-search');
     const backupSelect = document.getElementById('backup-select');
+    const actualConductorSearch = document.getElementById('actual-conductor-search');
+    const actualConductorSelect = document.getElementById('actual-conductor-select');
     
     // Filter conductor dropdown
     conductorSearch.addEventListener('input', (e) => {
@@ -592,6 +691,12 @@ function setupDropdownSearch() {
     backupSearch.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase().trim();
         filterSelectOptions(backupSelect, searchTerm);
+    });
+    
+    // Filter actual conductor dropdown
+    actualConductorSearch.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase().trim();
+        filterSelectOptions(actualConductorSelect, searchTerm);
     });
 }
 
@@ -654,8 +759,26 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     
     const attendanceRadio = document.querySelector('input[name="attendance"]:checked');
     let conductorShowedUp = null;
+    let actualConductorId = null;
+    
     if (attendanceRadio) {
         conductorShowedUp = attendanceRadio.value === 'yes';
+        
+        // If conductor didn't show up, check who conducted it
+        if (conductorShowedUp === false) {
+            const actualConductorOption = document.querySelector('input[name="actual-conductor-option"]:checked');
+            if (actualConductorOption && actualConductorOption.value === 'other') {
+                // Backup assigned to someone else
+                const actualConductorSelect = document.getElementById('actual-conductor-select');
+                if (actualConductorSelect.value) {
+                    actualConductorId = parseInt(actualConductorSelect.value);
+                } else {
+                    alert('Please select who was assigned to conduct the train');
+                    return;
+                }
+            }
+            // If actualConductorOption is 'backup' or not set, actualConductorId stays null (backup conducted)
+        }
     }
     
     const data = {
@@ -663,6 +786,7 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
         conductor_id: conductorId,
         backup_id: backupId,
         conductor_showed_up: conductorShowedUp,
+        actual_conductor_id: actualConductorId,
         notes
     };
     
@@ -773,7 +897,13 @@ function renderHistory(filter) {
         html += `</div>`;
         html += `<div><strong>Backup:</strong> ${escapeHtml(schedule.backup_name)}`;
         if (schedule.conductor_showed_up === false) {
-            html += ' <span class="status-badge active">🚂 Stepped in</span>';
+            if (schedule.actual_conductor_id) {
+                // Backup assigned to someone else
+                html += ' <span class="status-badge info">📋 Assigned to ' + escapeHtml(schedule.actual_conductor_name) + '</span>';
+            } else {
+                // Backup conducted it themselves
+                html += ' <span class="status-badge active">🚂 Stepped in</span>';
+            }
         }
         html += `</div>`;
         if (schedule.notes) {

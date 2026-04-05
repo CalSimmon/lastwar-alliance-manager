@@ -49,6 +49,7 @@ type MemberStats struct {
 	LastConductorDate    *string `json:"last_conductor_date"`
 	BackupCount          int     `json:"backup_count"`
 	BackupUsedCount      int     `json:"backup_used_count"`
+	ActualConductorCount int     `json:"actual_conductor_count"`
 	ConductorNoShowCount int     `json:"conductor_no_show_count"`
 }
 
@@ -66,17 +67,19 @@ type Credentials struct {
 }
 
 type TrainSchedule struct {
-	ID                int     `json:"id"`
-	Date              string  `json:"date"`
-	ConductorID       int     `json:"conductor_id"`
-	ConductorName     string  `json:"conductor_name"`
-	ConductorScore    *int    `json:"conductor_score"`
-	BackupID          int     `json:"backup_id"`
-	BackupName        string  `json:"backup_name"`
-	BackupRank        string  `json:"backup_rank"`
-	ConductorShowedUp *bool   `json:"conductor_showed_up"`
-	Notes             *string `json:"notes"`
-	CreatedAt         string  `json:"created_at"`
+	ID                  int     `json:"id"`
+	Date                string  `json:"date"`
+	ConductorID         int     `json:"conductor_id"`
+	ConductorName       string  `json:"conductor_name"`
+	ConductorScore      *int    `json:"conductor_score"`
+	BackupID            int     `json:"backup_id"`
+	BackupName          string  `json:"backup_name"`
+	BackupRank          string  `json:"backup_rank"`
+	ConductorShowedUp   *bool   `json:"conductor_showed_up"`
+	ActualConductorID   *int    `json:"actual_conductor_id"`
+	ActualConductorName *string `json:"actual_conductor_name"`
+	Notes               *string `json:"notes"`
+	CreatedAt           string  `json:"created_at"`
 }
 
 type Award struct {
@@ -474,14 +477,16 @@ func loadSettings() (Settings, error) {
 }
 
 // loadRecommendations loads recommendation counts for all members (active only)
-// A recommendation is active if the member hasn't been assigned as conductor/backup after it was created
+// A recommendation is active if the member hasn't been assigned as conductor/backup/actual_conductor after it was created
 func loadRecommendations() (map[int]int, error) {
 	rows, err := db.Query(`
 		SELECT r.member_id, COUNT(*) as rec_count
 		FROM recommendations r
 		WHERE NOT EXISTS (
 			SELECT 1 FROM train_schedules ts
-			WHERE (ts.conductor_id = r.member_id OR (ts.backup_id = r.member_id AND ts.conductor_showed_up = 0))
+			WHERE (ts.conductor_id = r.member_id 
+			       OR (ts.backup_id = r.member_id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+			       OR ts.actual_conductor_id = r.member_id)
 			AND ts.date >= date(r.created_at)
 		)
 		GROUP BY r.member_id
@@ -503,14 +508,16 @@ func loadRecommendations() (map[int]int, error) {
 }
 
 // loadAwards loads award scores for all members (active only)
-// An award is active if the member hasn't been assigned as conductor/backup after the award week
+// An award is active if the member hasn't been assigned as conductor/backup/actual_conductor after the award week
 func loadAwards(settings Settings) (map[int]int, error) {
 	rows, err := db.Query(`
 		SELECT a.member_id, a.rank
 		FROM awards a
 		WHERE NOT EXISTS (
 			SELECT 1 FROM train_schedules ts
-			WHERE (ts.conductor_id = a.member_id OR (ts.backup_id = a.member_id AND ts.conductor_showed_up = 0))
+			WHERE (ts.conductor_id = a.member_id 
+			       OR (ts.backup_id = a.member_id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+			       OR ts.actual_conductor_id = a.member_id)
 			AND ts.date >= a.week_date
 		)
 	`)
@@ -899,6 +906,25 @@ func initDB() error {
 		}
 
 		log.Println("Database migration: Successfully made backup_id nullable")
+	}
+
+	// Migrate existing train_schedules table to add actual_conductor_id column if missing
+	var actualConductorColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('train_schedules')
+		WHERE name = 'actual_conductor_id'
+	`).Scan(&actualConductorColumnExists)
+	if err != nil {
+		return err
+	}
+
+	if !actualConductorColumnExists {
+		_, err = db.Exec(`ALTER TABLE train_schedules ADD COLUMN actual_conductor_id INTEGER REFERENCES members(id) ON DELETE SET NULL`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added actual_conductor_id column to train_schedules table")
 	}
 
 	// Create award_types table
@@ -2129,10 +2155,11 @@ func getMemberStats(w http.ResponseWriter, r *http.Request) {
 			COUNT(DISTINCT CASE WHEN ts.conductor_id = m.id THEN ts.date END) as conductor_count,
 			MAX(CASE WHEN ts.conductor_id = m.id THEN ts.date END) as last_conductor_date,
 			COUNT(DISTINCT CASE WHEN ts.backup_id = m.id THEN ts.date END) as backup_count,
-			COUNT(DISTINCT CASE WHEN ts.backup_id = m.id AND ts.conductor_showed_up = 0 THEN ts.date END) as backup_used_count,
+			COUNT(DISTINCT CASE WHEN ts.backup_id = m.id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL THEN ts.date END) as backup_used_count,
+			COUNT(DISTINCT CASE WHEN ts.actual_conductor_id = m.id THEN ts.date END) as actual_conductor_count,
 			COUNT(DISTINCT CASE WHEN ts.conductor_id = m.id AND ts.conductor_showed_up = 0 THEN ts.date END) as conductor_no_show_count
 		FROM members m
-		LEFT JOIN train_schedules ts ON ts.conductor_id = m.id OR ts.backup_id = m.id
+		LEFT JOIN train_schedules ts ON ts.conductor_id = m.id OR ts.backup_id = m.id OR ts.actual_conductor_id = m.id
 		GROUP BY m.id, m.name, m.rank
 		ORDER BY m.name
 	`)
@@ -2146,7 +2173,7 @@ func getMemberStats(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s MemberStats
 		var lastDate sql.NullString
-		if err := rows.Scan(&s.ID, &s.Name, &s.Rank, &s.ConductorCount, &lastDate, &s.BackupCount, &s.BackupUsedCount, &s.ConductorNoShowCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Rank, &s.ConductorCount, &lastDate, &s.BackupCount, &s.BackupUsedCount, &s.ActualConductorCount, &s.ConductorNoShowCount); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -2240,10 +2267,12 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			ts.id, ts.date, ts.conductor_id, m1.name as conductor_name,
 			ts.conductor_score, ts.backup_id, m2.name as backup_name, m2.rank as backup_rank,
-			ts.conductor_showed_up, ts.notes, ts.created_at
+			ts.conductor_showed_up, ts.actual_conductor_id, m3.name as actual_conductor_name,
+			ts.notes, ts.created_at
 		FROM train_schedules ts
 		JOIN members m1 ON ts.conductor_id = m1.id
 		JOIN members m2 ON ts.backup_id = m2.id
+		LEFT JOIN members m3 ON ts.actual_conductor_id = m3.id
 	`
 
 	var rows *sql.Rows
@@ -2269,9 +2298,12 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 		var showedUp sql.NullBool
 		var notes sql.NullString
 		var score sql.NullInt64
+		var actualConductorID sql.NullInt64
+		var actualConductorName sql.NullString
 
 		if err := rows.Scan(&ts.ID, &ts.Date, &ts.ConductorID, &ts.ConductorName,
-			&score, &ts.BackupID, &ts.BackupName, &ts.BackupRank, &showedUp, &notes, &ts.CreatedAt); err != nil {
+			&score, &ts.BackupID, &ts.BackupName, &ts.BackupRank, &showedUp,
+			&actualConductorID, &actualConductorName, &notes, &ts.CreatedAt); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -2285,6 +2317,13 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 		if score.Valid {
 			scoreInt := int(score.Int64)
 			ts.ConductorScore = &scoreInt
+		}
+		if actualConductorID.Valid {
+			actualID := int(actualConductorID.Int64)
+			ts.ActualConductorID = &actualID
+		}
+		if actualConductorName.Valid {
+			ts.ActualConductorName = &actualConductorName.String
 		}
 
 		schedules = append(schedules, ts)
@@ -2317,8 +2356,8 @@ func createTrainSchedule(w http.ResponseWriter, r *http.Request) {
 
 	// Use INSERT OR REPLACE to allow updating schedules created by auto-schedule
 	result, err := db.Exec(
-		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, notes) VALUES (?, ?, ?, ?, ?, ?)",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.Notes)
+		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, actual_conductor_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2373,8 +2412,8 @@ func updateTrainSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(
-		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, notes = ? WHERE id = ?",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.Notes, id)
+		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, actual_conductor_id = ?, notes = ? WHERE id = ?",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -3288,7 +3327,9 @@ func getRecommendations(w http.ResponseWriter, r *http.Request) {
 			CASE 
 				WHEN EXISTS (
 					SELECT 1 FROM train_schedules ts
-					WHERE (ts.conductor_id = rec.member_id OR (ts.backup_id = rec.member_id AND ts.conductor_showed_up = 0))
+					WHERE (ts.conductor_id = rec.member_id 
+					       OR (ts.backup_id = rec.member_id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+					       OR ts.actual_conductor_id = rec.member_id)
 					AND ts.date >= date(rec.created_at)
 				) THEN 1
 				ELSE 0
@@ -3373,7 +3414,9 @@ func createRecommendation(w http.ResponseWriter, r *http.Request) {
 			CASE 
 				WHEN EXISTS (
 					SELECT 1 FROM train_schedules ts
-					WHERE (ts.conductor_id = rec.member_id OR (ts.backup_id = rec.member_id AND ts.conductor_showed_up = 0))
+					WHERE (ts.conductor_id = rec.member_id 
+					       OR (ts.backup_id = rec.member_id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+					       OR ts.actual_conductor_id = rec.member_id)
 					AND ts.date >= date(rec.created_at)
 				) THEN 1
 				ELSE 0
@@ -3742,7 +3785,9 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 			CASE 
 				WHEN EXISTS (
 					SELECT 1 FROM train_schedules ts
-					WHERE (ts.conductor_id = a.member_id OR (ts.backup_id = a.member_id AND ts.conductor_showed_up = 0))
+					WHERE (ts.conductor_id = a.member_id 
+					       OR (ts.backup_id = a.member_id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+					       OR ts.actual_conductor_id = a.member_id)
 					AND ts.date >= a.week_date
 				) THEN 1
 				ELSE 0
@@ -3974,10 +4019,12 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 		conductorDates := []string{}
 		conductorRows, err := db.Query(`
 			SELECT date FROM train_schedules 
-			WHERE (conductor_id = ? OR (backup_id = ? AND conductor_showed_up = 0))
+			WHERE (conductor_id = ? 
+			       OR (backup_id = ? AND conductor_showed_up = 0 AND actual_conductor_id IS NULL)
+			       OR actual_conductor_id = ?)
 			AND date >= ?
 			ORDER BY date ASC
-		`, member.ID, member.ID, formatDateString(startDate))
+		`, member.ID, member.ID, member.ID, formatDateString(startDate))
 		if err != nil {
 			continue
 		}

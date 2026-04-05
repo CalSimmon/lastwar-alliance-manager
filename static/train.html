@@ -158,9 +158,29 @@
                             <input type="radio" name="attendance" value="yes"> Yes, conductor made it
                         </label>
                         <label class="radio-label">
-                            <input type="radio" name="attendance" value="no"> No, backup had to step in
+                            <input type="radio" name="attendance" value="no"> No, conductor didn't show up
                         </label>
                     </div>
+                </div>
+
+                <div class="form-group" id="actual-conductor-group" style="display: none;">
+                    <label>Who conducted the train?</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="actual-conductor-option" value="backup"> Backup conducted it
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="actual-conductor-option" value="other"> Backup assigned to someone else
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" id="actual-conductor-select-group" style="display: none;">
+                    <label for="actual-conductor-select">Who was assigned?</label>
+                    <input type="text" id="actual-conductor-search" class="dropdown-search" placeholder="🔍 Search member...">
+                    <select id="actual-conductor-select" size="5">
+                        <option value="">Select Member</option>
+                    </select>
                 </div>
 
                 <div class="form-group">

@@ -2088,6 +2088,11 @@ button {
     color: white;
 }
 
+.status-badge.info {
+    background: #6c757d;
+    color: white;
+}
+
 .score-badge {
     display: inline-block;
     padding: 3px 10px;
