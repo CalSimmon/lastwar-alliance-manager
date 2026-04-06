@@ -1,10 +1,80 @@
 /**
- * Sidebar Navigation Toggle
- * Handles collapsible sidebar functionality with state persistence
+ * Navigation: Header + Sidebar injection and toggle
+ * Injects shared header/nav HTML into pages that declare data-subtitle on <body>.
+ * Handles collapsible sidebar functionality with state persistence.
  */
 
 (function() {
     'use strict';
+
+    // Inject shared <header> and <nav> into .container
+    function injectHeader() {
+        const subtitle = document.body.dataset.subtitle;
+        if (!subtitle) return; // login.html, modal-test.html etc. — skip
+
+        const h1 = document.body.dataset.h1 || '🎮 Last War: Survival';
+
+        const html = `
+        <header>
+            <h1>${h1}</h1>
+            <h2>${subtitle}</h2>
+            <div class="user-info">
+                <div class="user-dropdown">
+                    <button id="username-display" class="username-btn"></button>
+                    <div id="user-dropdown-menu" class="dropdown-menu">
+                        <a href="/profile.html" class="dropdown-item" id="profile-dropdown-link">👤 Profile</a>
+                        <a href="/admin.html" class="dropdown-item admin-only" id="admin-dropdown-link" style="display: none;">🔐 Admin Panel</a>
+                        <div class="dropdown-divider"></div>
+                        <div class="theme-section">
+                            <div class="theme-section-label">Theme</div>
+                            <a href="#" class="dropdown-item theme-option" data-theme="auto">● Auto (System)</a>
+                            <a href="#" class="dropdown-item theme-option" data-theme="light">○ Light</a>
+                            <a href="#" class="dropdown-item theme-option" data-theme="dark">○ Dark</a>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <a href="#" class="dropdown-item" id="dropdown-logout-btn">🚪 Logout</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <nav class="nav-menu">
+            <a href="/" class="nav-link">👥 Members</a>
+            <a href="/train.html" class="nav-link">🚂 Train</a>
+            <a href="/awards.html" class="nav-link">🏆 Awards</a>
+            <a href="/recommendations.html" class="nav-link">⭐ Recs</a>
+            <a href="/dyno.html" class="nav-link">💬 Dyno</a>
+            <a href="/rankings.html" class="nav-link">📊 Rankings</a>
+            <a href="/storm.html" class="nav-link">🏜️ Storm</a>
+            <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
+            <a href="/upload.html" class="nav-link">📸 Upload</a>
+            <a href="/settings.html" class="nav-link">⚙️ Settings</a>
+            <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
+        </nav>`;
+
+        const container = document.querySelector('.container');
+        if (!container) return;
+        container.insertAdjacentHTML('afterbegin', html);
+    }
+
+    // Mark profile dropdown item as active when on profile page
+    function setActiveDropdownLink() {
+        if (window.location.pathname === '/profile.html') {
+            const profileLink = document.getElementById('profile-dropdown-link');
+            if (profileLink) profileLink.classList.add('active');
+        }
+    }
+
+    // Mirror admin-dropdown-link visibility to admin-nav-link
+    function mirrorAdminNavLink() {
+        const dropdownAdminLink = document.getElementById('admin-dropdown-link');
+        const navAdminLink = document.getElementById('admin-nav-link');
+        if (!dropdownAdminLink || !navAdminLink) return;
+
+        const observer = new MutationObserver(() => {
+            navAdminLink.style.display = dropdownAdminLink.style.display;
+        });
+        observer.observe(dropdownAdminLink, { attributes: true, attributeFilter: ['style'] });
+    }
 
     // Create and insert toggle button
     function createToggleButton() {
@@ -155,10 +225,13 @@
 
     // Initialize on DOM ready
     function init() {
+        injectHeader();
         const toggleBtn = createToggleButton();
         const overlay = createOverlay();
         initializeSidebarState();
         setActiveLink();
+        setActiveDropdownLink();
+        mirrorAdminNavLink();
 
         // Event listeners
         toggleBtn.addEventListener('click', toggleSidebar);
