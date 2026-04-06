@@ -97,6 +97,76 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * Confirm Dialog
+ * Replaces window.confirm with a styled, themed dialog.
+ * Returns a Promise<boolean>.
+ */
+function showConfirm(message, title = 'Confirm', confirmText = 'Confirm', cancelText = 'Cancel', dangerous = false) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+
+        const dialog = document.createElement('div');
+        dialog.className = 'confirm-dialog';
+        dialog.setAttribute('role', 'alertdialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.innerHTML = `
+            <div class="confirm-title">${title}</div>
+            <div class="confirm-message">${message}</div>
+            <div class="confirm-buttons">
+                <button class="confirm-cancel-btn">${cancelText}</button>
+                <button class="confirm-ok-btn${dangerous ? ' confirm-dangerous' : ''}">${confirmText}</button>
+            </div>
+        `;
+
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        // Focus confirm button
+        requestAnimationFrame(() => dialog.querySelector('.confirm-ok-btn').focus());
+
+        const cleanup = (result) => {
+            overlay.classList.add('confirm-hiding');
+            setTimeout(() => overlay.remove(), 200);
+            document.removeEventListener('keydown', keyHandler);
+            resolve(result);
+        };
+
+        const keyHandler = (e) => {
+            if (e.key === 'Escape') cleanup(false);
+        };
+
+        dialog.querySelector('.confirm-ok-btn').addEventListener('click', () => cleanup(true));
+        dialog.querySelector('.confirm-cancel-btn').addEventListener('click', () => cleanup(false));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+        document.addEventListener('keydown', keyHandler);
+    });
+}
+
+/**
+ * Button Loading State Helpers
+ */
+function setButtonLoading(btn, loadingText = 'Loading...') {
+    if (!btn) return;
+    btn.disabled = true;
+    btn._originalHTML = btn.innerHTML;
+    btn.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span>${loadingText}`;
+}
+
+function clearButtonLoading(btn) {
+    if (!btn || btn._originalHTML === undefined) return;
+    btn.disabled = false;
+    btn.innerHTML = btn._originalHTML;
+    delete btn._originalHTML;
+}
+
+if (typeof window !== 'undefined') {
+    window.showConfirm = showConfirm;
+    window.setButtonLoading = setButtonLoading;
+    window.clearButtonLoading = clearButtonLoading;
+}
+
+/**
  * Scroll to Top Button
  * Automatically shows when user scrolls down
  */

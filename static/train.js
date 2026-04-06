@@ -93,16 +93,12 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        window.location.href = '/login.html';
     }
 }
 
@@ -173,6 +169,13 @@ document.getElementById('next-week').addEventListener('click', () => {
     hideWeeklyMessage();
 });
 
+document.getElementById('today-week-btn').addEventListener('click', () => {
+    currentWeekStart = getMondayOfWeek(new Date());
+    updateWeekDisplay();
+    loadSchedules();
+    hideWeeklyMessage();
+});
+
 // Hide weekly message section
 function hideWeeklyMessage() {
     document.getElementById('weekly-message-section').style.display = 'none';
@@ -194,7 +197,7 @@ async function generateWeeklyMessage() {
         document.getElementById('weekly-message-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (error) {
         console.error('Error generating message:', error);
-        alert('Failed to generate weekly message');
+        showToast('Failed to generate weekly message', 'error');
     }
 }
 
@@ -230,7 +233,7 @@ function showDailyMessageSection() {
 document.getElementById('load-daily-message-btn').addEventListener('click', async () => {
     const dateInput = document.getElementById('daily-message-date').value;
     if (!dateInput) {
-        alert('Please select a date');
+        showToast('Please select a date', 'warning');
         return;
     }
     
@@ -238,7 +241,7 @@ document.getElementById('load-daily-message-btn').addEventListener('click', asyn
         const response = await fetch(`/api/train-schedules/daily-message?date=${dateInput}`);
         if (!response.ok) {
             if (response.status === 404) {
-                alert('No schedule found for this date. Please create a schedule first.');
+                showToast('No schedule found for this date. Please create a schedule first.', 'warning');
             } else {
                 throw new Error('Failed to generate message');
             }
@@ -249,7 +252,7 @@ document.getElementById('load-daily-message-btn').addEventListener('click', asyn
         document.getElementById('daily-message').value = data.message;
     } catch (error) {
         console.error('Error generating daily message:', error);
-        alert('Failed to generate daily message');
+        showToast('Failed to generate daily message', 'error');
     }
 });
 
@@ -322,7 +325,7 @@ async function generateConductorMessages() {
         
     } catch (error) {
         console.error('Error generating conductor messages:', error);
-        alert('Failed to generate conductor reminder messages');
+        showToast('Failed to generate conductor reminder messages', 'error');
     }
 }
 
@@ -461,7 +464,7 @@ function renderScheduleGrid() {
 // Open schedule modal
 function openScheduleModal(dateStr) {
     if (!canEditSchedule()) {
-        alert('Only R4, R5 ranks and admins can edit the train schedule.');
+        showToast('Only R4, R5 ranks and admins can edit the train schedule.', 'warning');
         return;
     }
     
@@ -732,7 +735,7 @@ function filterSelectOptions(selectElement, searchTerm) {
 // Edit schedule
 function editSchedule(dateStr) {
     if (!canEditSchedule()) {
-        alert('Only R4, R5 ranks and admins can edit the train schedule.');
+        showToast('Only R4, R5 ranks and admins can edit the train schedule.', 'warning');
         return;
     }
     openScheduleModal(dateStr);
@@ -773,7 +776,7 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
                 if (actualConductorSelect.value) {
                     actualConductorId = parseInt(actualConductorSelect.value);
                 } else {
-                    alert('Please select who was assigned to conduct the train');
+                    showToast('Please select who was assigned to conduct the train', 'warning');
                     return;
                 }
             }
@@ -790,6 +793,8 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
         notes
     };
     
+    const submitBtn = document.getElementById('modal-submit');
+    setButtonLoading(submitBtn, 'Saving...');
     try {
         let response;
         if (id) {
@@ -816,20 +821,27 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
         await loadHistory();
     } catch (error) {
         console.error('Error saving schedule:', error);
-        alert('Failed to save schedule: ' + error.message);
+        showToast('Failed to save schedule: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(submitBtn);
     }
 });
 
 // Clear schedule for a day
 async function clearSchedule(scheduleId, dateStr) {
     if (!canEditSchedule()) {
-        alert('Only R4, R5 ranks and admins can edit the train schedule.');
+        showToast('Only R4, R5 ranks and admins can edit the train schedule.', 'warning');
         return;
     }
     
-    if (!confirm('Are you sure you want to clear this schedule?')) {
-        return;
-    }
+    const confirmed = await showConfirm(
+        'Clear this schedule? This cannot be undone.',
+        'Clear Schedule',
+        'Clear',
+        'Cancel',
+        true
+    );
+    if (!confirmed) return;
     
     try {
         const response = await fetch(`${API_URL}/${scheduleId}`, {
@@ -844,7 +856,7 @@ async function clearSchedule(scheduleId, dateStr) {
         await loadHistory();
     } catch (error) {
         console.error('Error clearing schedule:', error);
-        alert('Failed to clear schedule: ' + error.message);
+        showToast('Failed to clear schedule: ' + error.message, 'error');
     }
 }
 
@@ -942,9 +954,14 @@ async function autoScheduleWeek() {
     const hasExistingSchedules = Object.keys(schedules).some(dateStr => schedules[dateStr]);
     
     if (hasExistingSchedules) {
-        if (!confirm('This will automatically schedule the entire week (7 days) with the top 7 performers. Continue?')) {
-            return;
-        }
+        const confirmed = await showConfirm(
+            'This will automatically schedule the entire week (7 days) with the top 7 performers. Existing schedules will be replaced.',
+            'Auto-Schedule Week',
+            'Auto-Schedule',
+            'Cancel',
+            false
+        );
+        if (!confirmed) return;
     }
     
     try {
@@ -963,7 +980,7 @@ async function autoScheduleWeek() {
         await loadHistory();
     } catch (error) {
         console.error('Error auto-scheduling week:', error);
-        alert('Failed to auto-schedule week: ' + error.message);
+        showToast('Failed to auto-schedule week: ' + error.message, 'error');
     }
 }
 

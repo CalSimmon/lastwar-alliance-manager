@@ -100,7 +100,7 @@ function updateUIPermissions() {
 // Modal Functions
 function openMemberModal(editing = false) {
     if (!canManageRanks) {
-        alert('You do not have permission to manage members. Only R4 and R5 can do this.');
+        showToast('You do not have permission to manage members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     memberModal.style.display = 'flex';
@@ -243,7 +243,7 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     
     if (!canManageRanks) {
-        alert('You do not have permission to manage members. Only R4 and R5 can do this.');
+        showToast('You do not have permission to manage members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     
@@ -251,11 +251,17 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
     const rank = document.getElementById('member-rank').value;
     const eligible = document.getElementById('member-eligible').checked;
     
-    if (!name || !rank) {
-        alert('Please fill in all fields');
-        return;
-    }
+    // Inline validation
+    let valid = true;
+    const nameGroup = document.getElementById('member-name').closest('.form-group');
+    const rankGroup = document.getElementById('member-rank').closest('.form-group');
+    [nameGroup, rankGroup].forEach(g => g && g.classList.remove('has-error'));
+    if (!name) { nameGroup && nameGroup.classList.add('has-error'); valid = false; }
+    if (!rank) { rankGroup && rankGroup.classList.add('has-error'); valid = false; }
+    if (!valid) return;
 
+    const submitBtn = document.getElementById('submit-btn');
+    setButtonLoading(submitBtn, 'Saving...');
     try {
         if (editingMemberId) {
             // Update existing member
@@ -293,14 +299,16 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
         await loadMembers();
     } catch (error) {
         console.error('Error saving member:', error);
-        alert('Failed to save member. Please try again.');
+        showToast('Failed to save member. Please try again.', 'error');
+    } finally {
+        clearButtonLoading(submitBtn);
     }
 });
 
 // Edit a member
 function editMember(id, name, rank, eligible) {
     if (!canManageRanks) {
-        alert('You do not have permission to edit members. Only R4 and R5 can do this.');
+        showToast('You do not have permission to edit members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     
@@ -318,13 +326,18 @@ function editMember(id, name, rank, eligible) {
 // Delete a member
 async function deleteMember(id, name) {
     if (!canManageRanks) {
-        alert('You do not have permission to delete members. Only R4 and R5 can do this.');
+        showToast('You do not have permission to delete members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     
-    if (!confirm(`Are you sure you want to remove ${name} from the alliance?`)) {
-        return;
-    }
+    const confirmed = await showConfirm(
+        `Remove ${name} from the alliance? This action cannot be undone.`,
+        'Remove Member',
+        'Remove',
+        'Cancel',
+        true
+    );
+    if (!confirmed) return;
 
     try {
         const response = await fetch(`${API_URL}/${id}`, {
@@ -341,7 +354,7 @@ async function deleteMember(id, name) {
         await loadMembers();
     } catch (error) {
         console.error('Error deleting member:', error);
-        alert('Failed to delete member. Please try again.');
+        showToast('Failed to delete member. Please try again.', 'error');
     }
 }
 
@@ -354,10 +367,6 @@ function escapeHtml(text) {
 
 // Logout handler
 async function handleLogout() {
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
     try {
         const response = await fetch('/api/logout', {
             method: 'POST'
@@ -454,18 +463,18 @@ function setupCSVImport() {
     // Preview CSV button
     importBtn.addEventListener('click', async () => {
         if (!canManageRanks) {
-            alert('You do not have permission to import members. Only R4 and R5 can do this.');
+            showToast('You do not have permission to import members. Only R4 and R5 can do this.', 'warning');
             return;
         }
         
         const file = fileInput.files[0];
         if (!file) {
-            alert('Please select a CSV file to import');
+            showToast('Please select a CSV file to import', 'warning');
             return;
         }
         
         if (!file.name.endsWith('.csv')) {
-            alert('Please select a valid CSV file');
+            showToast('Please select a valid CSV file', 'warning');
             return;
         }
         
@@ -529,7 +538,7 @@ function setupCSVImport() {
         const selectedMembers = detectedCSVMembers.filter((_, i) => selectedCSVMembers.has(i));
         
         if (selectedMembers.length === 0) {
-            alert('Please select at least one member to import');
+            showToast('Please select at least one member to import', 'warning');
             return;
         }
         
@@ -552,12 +561,14 @@ function setupCSVImport() {
                 const member = membersToRemove.find(m => m.id === id);
                 return member ? member.name : 'Unknown';
             }).join(', ');
-            const confirmMsg = `⚠️ WARNING: You are about to delete ${removeMemberIDs.length} member(s)!\n\n` +
-                             `Members: ${memberNames}\n\n` +
-                             `Are you sure you want to continue?`;
-            if (!confirm(confirmMsg)) {
-                return;
-            }
+            const confirmed = await showConfirm(
+                `You are about to delete ${removeMemberIDs.length} member(s): ${memberNames}. This cannot be undone.`,
+                '⚠️ Delete Members',
+                'Delete',
+                'Cancel',
+                true
+            );
+            if (!confirmed) return;
         }
         
         confirmBtn.disabled = true;
@@ -606,7 +617,7 @@ function setupCSVImport() {
             
         } catch (error) {
             console.error('Confirm error:', error);
-            alert('Error importing members: ' + error.message);
+            showToast('Error importing members: ' + error.message, 'error');
         } finally {
             confirmBtn.disabled = false;
             confirmBtn.textContent = '✔ Confirm & Import Selected';
@@ -802,11 +813,8 @@ async function createUserForMember(memberId, memberName) {
         
         const result = await response.json();
         
-        // Display the username and password in a popup
-        const message = `User created successfully!\n\nUsername: ${result.username}\nPassword: ${result.password}\n\n⚠️ IMPORTANT: Save this password now! It won't be shown again.`;
-        alert(message);
-        
-        // Also log to console for easy copying
+        // Display the username and password in a toast + console
+        showToast(`User created! Username: ${result.username} — Password: ${result.password} (saved to console)`, 'success', 8000);
         console.log('=== NEW USER CREDENTIALS ===');
         console.log('Username:', result.username);
         console.log('Password:', result.password);
@@ -814,23 +822,28 @@ async function createUserForMember(memberId, memberName) {
         
     } catch (error) {
         console.error('Error creating user:', error);
-        alert('Failed to create user: ' + error.message);
+        showToast('Failed to create user: ' + error.message, 'error');
     }
 }
 
 // Toggle member eligibility for train
 async function toggleEligible(id, currentStatus) {
     if (!canManageRanks) {
-        alert('You do not have permission to manage members. Only R4 and R5 can do this.');
+        showToast('You do not have permission to manage members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     
     const newStatus = !currentStatus;
     const statusText = newStatus ? 'eligible' : 'not eligible';
     
-    if (!confirm(`Mark this member as ${statusText} for train scheduling?`)) {
-        return;
-    }
+    const confirmed = await showConfirm(
+        `Mark this member as ${statusText} for train scheduling?`,
+        'Update Eligibility',
+        'Confirm',
+        'Cancel',
+        false
+    );
+    if (!confirmed) return;
     
     try {
         // Get current member data
@@ -861,6 +874,6 @@ async function toggleEligible(id, currentStatus) {
         loadMembers();
     } catch (error) {
         console.error('Error toggling eligibility:', error);
-        alert('Failed to update member eligibility: ' + error.message);
+        showToast('Failed to update member eligibility: ' + error.message, 'error');
     }
 }

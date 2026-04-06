@@ -83,16 +83,12 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        window.location.href = '/login.html';
     }
 }
 
@@ -143,6 +139,12 @@ function navigatePrevWeek() {
 
 function navigateNextWeek() {
     currentWeekDate.setDate(currentWeekDate.getDate() + 7);
+    updateWeekDisplay();
+    loadAwards();
+}
+
+function navigateToCurrentWeek() {
+    currentWeekDate = getMostRecentMonday();
     updateWeekDisplay();
     loadAwards();
 }
@@ -440,10 +442,9 @@ async function saveAwards() {
     
     // Warn user if saving will delete hidden awards
     if (hiddenAwardsWithData.length > 0) {
-        const message = `Warning: ${hiddenAwardsWithData.length} hidden award(s) have saved data that will be deleted:\n\n${hiddenAwardsWithData.join(', ')}\n\nOnly visible awards will be saved. Continue?`;
-        if (!confirm(message)) {
-            return;
-        }
+        const message = `${hiddenAwardsWithData.length} hidden award(s) have saved data that will be deleted: ${hiddenAwardsWithData.join(', ')}. Only visible awards will be saved. Continue?`;
+        const confirmed = await showConfirm(message, '⚠️ Hidden Awards Will Be Deleted', 'Save Anyway', 'Cancel', true);
+        if (!confirmed) return;
     }
     
     const awards = [];
@@ -461,6 +462,8 @@ async function saveAwards() {
         }
     });
     
+    const saveBtn = document.getElementById('save-awards-btn');
+    setButtonLoading(saveBtn, 'Saving...');
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
@@ -472,11 +475,13 @@ async function saveAwards() {
             throw new Error('Failed to save awards');
         }
         
-        alert('✓ Awards saved successfully!');
+        showToast('Awards saved successfully!', 'success');
         await loadHistory();
     } catch (error) {
         console.error('Error saving awards:', error);
-        alert('Failed to save awards: ' + error.message);
+        showToast('Failed to save awards: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(saveBtn);
     }
 }
 
@@ -484,10 +489,17 @@ async function saveAwards() {
 async function clearAwards() {
     const weekDate = formatDate(currentWeekDate);
     
-    if (!confirm('Clear all awards for this week? This cannot be undone.')) {
-        return;
-    }
+    const confirmed = await showConfirm(
+        'Clear all awards for this week? This cannot be undone.',
+        'Clear Awards',
+        'Clear',
+        'Cancel',
+        true
+    );
+    if (!confirmed) return;
     
+    const clearBtn = document.getElementById('clear-awards-btn');
+    setButtonLoading(clearBtn, 'Clearing...');
     try {
         const response = await fetch(`${API_URL}/${weekDate}`, {
             method: 'DELETE'
@@ -500,10 +512,12 @@ async function clearAwards() {
         currentAwards = {};
         renderAwardsForm();
         await loadHistory();
-        alert('✓ Awards cleared for this week.');
+        showToast('Awards cleared for this week.', 'success');
     } catch (error) {
         console.error('Error clearing awards:', error);
-        alert('Failed to clear awards: ' + error.message);
+        showToast('Failed to clear awards: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(clearBtn);
     }
 }
 
@@ -609,13 +623,13 @@ function escapeHtml(text) {
 // Add new award type
 async function addNewAwardType(name) {
     if (!name || !name.trim()) {
-        alert('Please enter an award name');
+        showToast('Please enter an award name', 'warning');
         return false;
     }
     
     // Check if already exists
     if (AWARD_TYPES.includes(name.trim())) {
-        alert('This award type already exists');
+        showToast('This award type already exists', 'warning');
         return false;
     }
     
@@ -641,16 +655,16 @@ async function addNewAwardType(name) {
             document.getElementById('award-suggestions').style.display = 'none';
             return true;
         } else if (response.status === 409) {
-            alert('This award type already exists in the database');
+            showToast('This award type already exists in the database', 'warning');
             return false;
         } else {
             const error = await response.text();
-            alert('Error adding award type: ' + error);
+            showToast('Error adding award type: ' + error, 'error');
             return false;
         }
     } catch (error) {
         console.error('Error adding award type:', error);
-        alert('Error adding award type. Please try again.');
+        showToast('Error adding award type. Please try again.', 'error');
         return false;
     }
 }
@@ -773,11 +787,11 @@ function setupAwardSearch() {
                             searchInput.value = '';
                             suggestionsDiv.style.display = 'none';
                         } else {
-                            alert('Failed to reactivate award type');
+                            showToast('Failed to reactivate award type', 'error');
                         }
                     } catch (error) {
                         console.error('Error reactivating award:', error);
-                        alert('Error reactivating award type');
+                        showToast('Error reactivating award type', 'error');
                     }
                 });
             });
@@ -792,9 +806,14 @@ function setupAwardSearch() {
                     const button = e.target.closest('button');
                     const awardName = button.dataset.award;
                     
-                    if (!confirm(`Are you sure you want to completely delete "${awardName}"?\\n\\nThis will remove it and all its history permanently!`)) {
-                        return;
-                    }
+                    const confirmed = await showConfirm(
+                        `Permanently delete "${awardName}"? This will remove it and all its history. This cannot be undone!`,
+                        'Delete Award Type',
+                        'Delete Permanently',
+                        'Cancel',
+                        true
+                    );
+                    if (!confirmed) return;
                     
                     try {
                         const response = await fetch(`${AWARD_TYPES_URL}/${id}?force=true`, {
@@ -814,14 +833,14 @@ function setupAwardSearch() {
                             renderAwardsForm(true);
                             searchInput.value = '';
                             suggestionsDiv.style.display = 'none';
-                            alert(`Award type "${awardName}" deleted successfully!`);
+                            showToast(`Award type "${awardName}" deleted successfully!`, 'success');
                         } else {
                             const error = await response.text();
-                            alert(`Failed to delete: ${error}`);
+                            showToast(`Failed to delete: ${error}`, 'error');
                         }
                     } catch (error) {
                         console.error('Error deleting award:', error);
-                        alert('Error deleting award type');
+                        showToast('Error deleting award type', 'error');
                     }
                 });
             });
@@ -909,6 +928,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Set up event listeners after DOM is ready
         document.getElementById('prev-week').addEventListener('click', navigatePrevWeek);
         document.getElementById('next-week').addEventListener('click', navigateNextWeek);
+        document.getElementById('today-week-btn').addEventListener('click', navigateToCurrentWeek);
         document.getElementById('save-awards-btn').addEventListener('click', saveAwards);
         document.getElementById('clear-awards-btn').addEventListener('click', clearAwards);
         document.getElementById('history-search').addEventListener('input', renderHistory);
