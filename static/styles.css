@@ -3477,6 +3477,10 @@ button {
     border-radius: 8px;
     border: 1px solid var(--border-color);
     flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .filter-group {
@@ -3627,15 +3631,6 @@ button {
     background: linear-gradient(to right, rgba(205, 127, 50, 0.1), var(--container-bg));
 }
 
-.ranking-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid var(--border-color);
-}
-
 .ranking-position {
     display: flex;
     flex-direction: column;
@@ -3665,6 +3660,26 @@ button {
     margin-left: 10px;
 }
 
+.rank-badge-r5 {
+    background: linear-gradient(135deg, #ff6b35, #f7931e);
+}
+
+.rank-badge-r4 {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+.rank-badge-r3 {
+    background: linear-gradient(135deg, #28a745, #20c997);
+}
+
+.rank-badge-r2 {
+    background: linear-gradient(135deg, #17a2b8, #6610f2);
+}
+
+.rank-badge-r1 {
+    background: #6c757d;
+}
+
 .total-score {
     display: flex;
     flex-direction: column;
@@ -3691,6 +3706,67 @@ button {
     display: flex;
     flex-direction: column;
     gap: 20px;
+}
+
+.ranking-details.collapsed {
+    display: none;
+}
+
+.ranking-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.ranking-header:hover {
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.ranking-card:not(:has(.ranking-details.collapsed)) .ranking-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.expand-icon {
+    font-size: 1.2em;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    margin-left: 15px;
+}
+
+.rank-change {
+    font-size: 0.75em;
+    font-weight: 700;
+    margin-left: 8px;
+}
+
+.rank-up {
+    color: #28a745;
+}
+
+.rank-down {
+    color: #dc3545;
+}
+
+.rank-same {
+    color: var(--text-muted);
+    font-size: 0.65em;
+}
+
+.timeline-loading {
+    text-align: center;
+    padding: 30px;
+    color: var(--text-muted);
+    font-style: italic;
 }
 
 .detail-section {
@@ -4003,6 +4079,16 @@ button {
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
+    }
+    
+    .expand-icon {
+        position: absolute;
+        right: 15px;
+        top: 15px;
+    }
+    
+    .filter-controls {
+        position: static;
     }
     
     .total-score {

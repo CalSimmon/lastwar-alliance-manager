@@ -66,8 +66,19 @@
                             <option value="R1">R1</option>
                         </select>
                     </div>
+                    <div class="filter-group">
+                        <label for="sort-by">🔃 Sort by:</label>
+                        <select id="sort-by">
+                            <option value="total_score">Total Score</option>
+                            <option value="conductor_count">Conductor Count</option>
+                            <option value="days_since">Days Since Conductor</option>
+                            <option value="award_points">Award Points</option>
+                            <option value="recommendation_points">Recommendations</option>
+                            <option value="name">Name (A-Z)</option>
+                        </select>
                     </div>
                     <button id="clear-filters-btn" class="secondary-btn">✖️ Clear Filters</button>
+                    <button id="export-csv-btn" class="secondary-btn">📥 Export CSV</button>
                 </div>
                 
                 <div id="rankings-list" class="rankings-list">

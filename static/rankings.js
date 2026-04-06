@@ -3,7 +3,9 @@ const RANKINGS_URL = `${API_BASE}/rankings`;
 
 let currentData = null;
 let filteredRankings = null;
+let previousRankings = null; // Track previous rankings for change indicators
 let memberTimelineCharts = [];
+let cachedTimelineData = null;
 let charts = {
     score: null,
     conductor: null,
@@ -29,7 +31,7 @@ async function checkAuth() {
 }
 
 // Setup event listeners after auth check
-async function setupEventListeners() {
+function setupEventListeners(authData) {
     const usernameDisplay = document.getElementById('username-display');
     const logoutBtn = document.getElementById('dropdown-logout-btn');
     const adminLink = document.getElementById('admin-dropdown-link');
@@ -42,15 +44,9 @@ async function setupEventListeners() {
         logoutBtn.addEventListener('click', handleLogout);
     }
     
-    // Check if user is admin to show admin link
-    try {
-        const response = await fetch(`${API_BASE}/check-auth`);
-        const data = await response.json();
-        if (data.is_admin && adminLink) {
-            adminLink.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Error checking admin status:', error);
+    // Use auth data passed from checkAuth to avoid duplicate request
+    if (authData.is_admin && adminLink) {
+        adminLink.style.display = 'block';
     }
     
     // Close dropdown when clicking outside
@@ -97,6 +93,18 @@ async function loadRankings() {
         if (!response.ok) throw new Error('Failed to load rankings');
         
         currentData = await response.json();
+        
+        // Invalidate cached timeline data on refresh
+        cachedTimelineData = null;
+        
+        // Build previous ranking map before updating
+        if (filteredRankings) {
+            previousRankings = {};
+            filteredRankings.forEach((r, i) => {
+                previousRankings[r.member.id] = i;
+            });
+        }
+        
         filteredRankings = currentData.rankings;
         
         displaySystemInfo(currentData.settings, currentData.average_conductor_count);
@@ -167,15 +175,13 @@ function displayCharts(data) {
     Object.values(charts).forEach(chart => {
         if (chart) chart.destroy();
     });
+    charts = { score: null, conductor: null, pointsBreakdown: null };
     
     // 1. Score Distribution Chart
     const scoreLabels = rankings.map((r, i) => `#${i + 1} ${r.member.name}`);
     const scoreData = rankings.map(r => r.total_score);
     
     const scoreCanvas = document.getElementById('scoreChart');
-    const existingScoreChart = Chart.getChart(scoreCanvas);
-    if (existingScoreChart) existingScoreChart.destroy();
-    
     const scoreCtx = scoreCanvas.getContext('2d');
     charts.score = new Chart(scoreCtx, {
         type: 'bar',
@@ -210,9 +216,6 @@ function displayCharts(data) {
     conductorCounts.sort((a, b) => b.count - a.count);
     
     const conductorCanvas = document.getElementById('conductorChart');
-    const existingConductorChart = Chart.getChart(conductorCanvas);
-    if (existingConductorChart) existingConductorChart.destroy();
-    
     const conductorCtx = conductorCanvas.getContext('2d');
     charts.conductor = new Chart(conductorCtx, {
         type: 'bar',
@@ -245,9 +248,6 @@ function displayCharts(data) {
     // 3. Points Breakdown Chart (Top 10)
     const top10 = rankings.slice(0, 10);
     const pointsBreakdownCanvas = document.getElementById('pointsBreakdownChart');
-    const existingPointsChart = Chart.getChart(pointsBreakdownCanvas);
-    if (existingPointsChart) existingPointsChart.destroy();
-    
     const pointsBreakdownCtx = pointsBreakdownCanvas.getContext('2d');
     charts.pointsBreakdown = new Chart(pointsBreakdownCtx, {
         type: 'bar',
@@ -301,37 +301,29 @@ function displayCharts(data) {
             }
         }
     });
-    
-    // Create member timeline charts
-    createMemberTimelineCharts(rankings);
 }
 
-// Create timeline charts for each member showing point accumulation over last 3 months
-async function createMemberTimelineCharts(rankings) {
-    // Destroy existing member charts
-    memberTimelineCharts.forEach(chart => chart.destroy());
-    memberTimelineCharts = [];
+// Build a single member's timeline chart using cached data
+function buildMemberChart(ranking, timelineData) {
+    const memberData = timelineData[ranking.member.id];
+    const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
+    const canvas = document.getElementById(`timeline-${ranking.member.id}`);
     
-    // Fetch timeline data and power history for each member (last 3 months)
-    try {
-        const response = await fetch(`${API_BASE}/member-timelines?months=3`);
-        if (!response.ok) throw new Error('Failed to load timeline data');
-        
-        const timelineData = await response.json();
-        
-        // Create chart for each member within their ranking card
-        for (const ranking of rankings) {
-            const memberData = timelineData[ranking.member.id];
-            if (!memberData || memberData.dates.length === 0) continue;
-            
-            const canvas = document.getElementById(`timeline-${ranking.member.id}`);
-            if (!canvas) continue;
-            
-            // Destroy any existing chart on this canvas
-            const existingChart = Chart.getChart(canvas);
-            if (existingChart) {
-                existingChart.destroy();
-            }
+    if (!memberData || memberData.dates.length === 0) {
+        if (loadingEl) loadingEl.innerHTML = '<p class="empty">No timeline data available.</p>';
+        return;
+    }
+    if (!canvas) return;
+    
+    // Hide loading, show canvas
+    if (loadingEl) loadingEl.style.display = 'none';
+    canvas.style.display = '';
+    
+    // Destroy any existing chart on this canvas
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart) existingChart.destroy();
+    // Also remove from tracked array
+    memberTimelineCharts = memberTimelineCharts.filter(c => c.canvas !== canvas);
             
             // Get member-specific settings
             const showReset = document.getElementById(`show-reset-${ranking.member.id}`)?.checked ?? true;
@@ -607,10 +599,6 @@ async function createMemberTimelineCharts(rankings) {
             });
             
             memberTimelineCharts.push(chart);
-        }
-    } catch (error) {
-        console.error('Error creating member timeline charts:', error);
-    }
 }
 
 // Format power for chart labels (short)
@@ -646,12 +634,39 @@ function filterRankings() {
 function clearFilters() {
     document.getElementById('filter-name').value = '';
     document.getElementById('filter-rank').value = '';
+    document.getElementById('sort-by').value = 'total_score';
     filteredRankings = currentData.rankings;
     displayRankings(filteredRankings);
 }
 
+// Get rank badge color class
+function getRankBadgeClass(rank) {
+    switch (rank) {
+        case 'R5': return 'rank-badge-r5';
+        case 'R4': return 'rank-badge-r4';
+        case 'R3': return 'rank-badge-r3';
+        case 'R2': return 'rank-badge-r2';
+        case 'R1': return 'rank-badge-r1';
+        default: return '';
+    }
+}
+
+// Get rank change indicator
+function getRankChangeIndicator(memberId, currentIndex) {
+    if (!previousRankings || previousRankings[memberId] === undefined) return '';
+    const prevIndex = previousRankings[memberId];
+    const diff = prevIndex - currentIndex;
+    if (diff > 0) return `<span class="rank-change rank-up" title="Up ${diff}">▲ ${diff}</span>`;
+    if (diff < 0) return `<span class="rank-change rank-down" title="Down ${Math.abs(diff)}">▼ ${Math.abs(diff)}</span>`;
+    return '<span class="rank-change rank-same">—</span>';
+}
+
 // Display rankings
 function displayRankings(rankings) {
+    // Destroy existing member timeline charts
+    memberTimelineCharts.forEach(chart => chart.destroy());
+    memberTimelineCharts = [];
+
     if (rankings.length === 0) {
         document.getElementById('rankings-list').innerHTML = 
             '<p class="empty">No members match the current filters.</p>';
@@ -662,21 +677,23 @@ function displayRankings(rankings) {
     rankings.forEach((ranking, index) => {
         const rankClass = index === 0 ? 'rank-first' : index === 1 ? 'rank-second' : index === 2 ? 'rank-third' : '';
         const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+        const changeIndicator = getRankChangeIndicator(ranking.member.id, index);
         
         html += `
-            <div class="ranking-card ${rankClass}">
-                <div class="ranking-header">
+            <div class="ranking-card ${rankClass}" data-member-id="${ranking.member.id}">
+                <div class="ranking-header" onclick="toggleCardDetails(${ranking.member.id})">
                     <div class="ranking-position">
-                        <span class="position-number">${medal} #${index + 1}</span>
-                        <h4>${escapeHtml(ranking.member.name)} <span class="rank-badge">${ranking.member.rank}</span></h4>
+                        <span class="position-number">${medal} #${index + 1} ${changeIndicator}</span>
+                        <h4>${escapeHtml(ranking.member.name)} <span class="rank-badge ${getRankBadgeClass(ranking.member.rank)}">${ranking.member.rank}</span></h4>
                     </div>
                     <div class="total-score">
                         <span class="score-value">${ranking.total_score}</span>
                         <span class="score-label">pts</span>
                     </div>
+                    <span class="expand-icon">▶</span>
                 </div>
                 
-                <div class="ranking-details">
+                <div class="ranking-details collapsed" id="details-${ranking.member.id}">
                     <div class="detail-section">
                         <h5>📊 Score Breakdown</h5>
                         <div class="detail-grid">
@@ -784,7 +801,10 @@ function displayRankings(rankings) {
                                 <span>Logarithmic Scale</span>
                             </label>
                         </div>
-                        <canvas id="timeline-${ranking.member.id}" class="member-timeline-canvas"></canvas>
+                        <div class="timeline-loading" id="timeline-loading-${ranking.member.id}">
+                            <p>📊 Loading timeline data...</p>
+                        </div>
+                        <canvas id="timeline-${ranking.member.id}" class="member-timeline-canvas" style="display:none;"></canvas>
                     </div>
                 </div>
             </div>
@@ -793,10 +813,11 @@ function displayRankings(rankings) {
     
     document.getElementById('rankings-list').innerHTML = html;
     
-    // Add event listeners for timeline options (per member)
+    // Add event listeners for timeline options — rebuild only that member's chart
     document.querySelectorAll('.timeline-option').forEach(element => {
-        element.addEventListener('change', () => {
-            if (currentData) displayCharts(currentData);
+        element.addEventListener('change', (e) => {
+            const memberId = parseInt(e.target.dataset.memberId);
+            rebuildSingleMemberChart(memberId);
         });
     });
     
@@ -807,9 +828,53 @@ function displayRankings(rankings) {
             toggleInactiveAwards(memberId, e.target.checked);
         });
     });
+}
+
+// Toggle card details and lazy-load chart
+function toggleCardDetails(memberId) {
+    const details = document.getElementById(`details-${memberId}`);
+    const card = details.closest('.ranking-card');
+    const icon = card.querySelector('.expand-icon');
     
-    // Create timeline charts after rendering rankings
-    createMemberTimelineCharts(filteredRankings);
+    if (details.classList.contains('collapsed')) {
+        details.classList.remove('collapsed');
+        icon.textContent = '▼';
+        // Lazy-load timeline chart on first expand
+        if (!details.dataset.chartLoaded) {
+            details.dataset.chartLoaded = 'true';
+            const ranking = filteredRankings.find(r => r.member.id === memberId);
+            if (ranking) {
+                loadSingleMemberTimeline(ranking);
+            }
+        }
+    } else {
+        details.classList.add('collapsed');
+        icon.textContent = '▶';
+    }
+}
+
+// Load timeline for a single member (lazy)
+async function loadSingleMemberTimeline(ranking) {
+    if (!cachedTimelineData) {
+        try {
+            const response = await fetch(`${API_BASE}/member-timelines?months=3`);
+            if (!response.ok) throw new Error('Failed to load timeline data');
+            cachedTimelineData = await response.json();
+        } catch (error) {
+            console.error('Error loading timeline data:', error);
+            const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
+            if (loadingEl) loadingEl.innerHTML = '<p class="error">Failed to load timeline.</p>';
+            return;
+        }
+    }
+    buildMemberChart(ranking, cachedTimelineData);
+}
+
+// Rebuild a single member's chart when options change
+function rebuildSingleMemberChart(memberId) {
+    if (!cachedTimelineData) return;
+    const ranking = filteredRankings.find(r => r.member.id === memberId);
+    if (ranking) buildMemberChart(ranking, cachedTimelineData);
 }
 
 // Toggle inactive awards for a specific member
@@ -874,9 +939,11 @@ function getWeeksAgo(weekDate) {
     const awardDate = new Date(weekDate);
     const today = new Date();
     
-    // Calculate Monday of current week
+    // Calculate Monday of current week (handle Sunday where getDay() === 0)
     const currentMonday = new Date(today);
-    currentMonday.setDate(today.getDate() - today.getDay() + 1);
+    const day = today.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    currentMonday.setDate(today.getDate() - diff);
     currentMonday.setHours(0, 0, 0, 0);
     
     // Calculate difference in weeks
@@ -908,16 +975,83 @@ function escapeHtml(text) {
 // Refresh rankings
 document.getElementById('refresh-btn').addEventListener('click', loadRankings);
 
+// Debounce utility
+function debounce(fn, delay) {
+    let timer;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+// Sort rankings
+function sortRankings() {
+    if (!filteredRankings) return;
+    const sortBy = document.getElementById('sort-by').value;
+    
+    filteredRankings.sort((a, b) => {
+        switch (sortBy) {
+            case 'total_score':
+                return b.total_score - a.total_score;
+            case 'conductor_count':
+                return b.conductor_count - a.conductor_count;
+            case 'days_since':
+                return (b.days_since_last_conductor ?? 9999) - (a.days_since_last_conductor ?? 9999);
+            case 'award_points':
+                return b.award_points - a.award_points;
+            case 'recommendation_points':
+                return b.recommendation_points - a.recommendation_points;
+            case 'name':
+                return a.member.name.localeCompare(b.member.name);
+            default:
+                return 0;
+        }
+    });
+    displayRankings(filteredRankings);
+}
+
+// Export rankings to CSV
+function exportCSV() {
+    if (!filteredRankings || filteredRankings.length === 0) return;
+    
+    const headers = ['Rank', 'Name', 'Alliance Rank', 'Total Score', 'Award Points', 'Recommendation Points', 'Rank Boost', 'First Timer Boost', 'Recent Conductor Penalty', 'Above Average Penalty', 'Conductor Count', 'Last Conductor Date'];
+    const rows = filteredRankings.map((r, i) => [
+        i + 1,
+        '"' + r.member.name.replace(/"/g, '""') + '"',
+        r.member.rank,
+        r.total_score,
+        r.award_points,
+        r.recommendation_points,
+        r.rank_boost,
+        r.first_time_conductor_boost,
+        r.recent_conductor_penalty,
+        r.above_average_penalty,
+        r.conductor_count,
+        r.last_conductor_date || ''
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `rankings_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     const auth = await checkAuth();
     if (auth) {
-        await setupEventListeners();
+        setupEventListeners(auth);
         await loadRankings();
         
-        // Add filter event listeners
-        document.getElementById('filter-name').addEventListener('input', filterRankings);
+        // Add filter event listeners with debounce on text input
+        document.getElementById('filter-name').addEventListener('input', debounce(filterRankings, 300));
         document.getElementById('filter-rank').addEventListener('change', filterRankings);
+        document.getElementById('sort-by').addEventListener('change', sortRankings);
         document.getElementById('clear-filters-btn').addEventListener('click', clearFilters);
+        document.getElementById('export-csv-btn').addEventListener('click', exportCSV);
     }
 });
