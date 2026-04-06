@@ -1,6 +1,19 @@
 const API_BASE = '/api';
 const RANKINGS_URL = `${API_BASE}/rankings`;
 
+// Read CSS variable as a color string
+function getCSSColor(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+// Apply theme-aware Chart.js defaults
+function applyChartTheme() {
+    const textColor = getCSSColor('--text-primary');
+    const borderColor = getCSSColor('--border-color');
+    Chart.defaults.color = textColor;
+    Chart.defaults.borderColor = borderColor;
+}
+
 let currentData = null;
 let filteredRankings = null;
 let previousRankings = null; // Track previous rankings for change indicators
@@ -171,6 +184,9 @@ function displaySystemInfo(settings, avgCount) {
 function displayCharts(data) {
     const rankings = data.rankings;
     
+    // Apply theme-aware defaults before rendering
+    applyChartTheme();
+    
     // Destroy existing charts
     Object.values(charts).forEach(chart => {
         if (chart) chart.destroy();
@@ -190,8 +206,8 @@ function displayCharts(data) {
             datasets: [{
                 label: 'Total Score',
                 data: scoreData.slice(0, 15),
-                backgroundColor: 'rgba(102, 126, 234, 0.8)',
-                borderColor: 'rgba(102, 126, 234, 1)',
+                backgroundColor: getCSSColor('--accent-primary') + 'cc',
+                borderColor: getCSSColor('--accent-primary'),
                 borderWidth: 1
             }]
         },
@@ -224,8 +240,8 @@ function displayCharts(data) {
             datasets: [{
                 label: 'Conductor Count',
                 data: conductorCounts.slice(0, 15).map(c => c.count),
-                backgroundColor: 'rgba(255, 159, 64, 0.8)',
-                borderColor: 'rgba(255, 159, 64, 1)',
+                backgroundColor: getCSSColor('--color-orange') + 'cc',
+                borderColor: getCSSColor('--color-orange'),
                 borderWidth: 1
             }]
         },
@@ -333,6 +349,7 @@ function buildMemberChart(ranking, timelineData) {
             const scaleType = document.querySelector(`input[name="scale-type-${ranking.member.id}"]:checked`)?.value || 'linear';
             
             const ctx = canvas.getContext('2d');
+            applyChartTheme();
             
             const datasets = [];
             
@@ -496,8 +513,8 @@ function buildMemberChart(ranking, timelineData) {
                 datasets.push({
                     label: 'Power',
                     data: memberData.power,
-                    borderColor: 'rgba(102, 126, 234, 1)',
-                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    borderColor: getCSSColor('--accent-primary'),
+                    backgroundColor: getCSSColor('--accent-primary') + '1a',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.1,

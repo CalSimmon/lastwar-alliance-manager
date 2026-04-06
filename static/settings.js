@@ -24,7 +24,7 @@ async function checkAuth() {
             
             const notice = document.createElement('div');
             notice.className = 'permission-notice';
-            notice.style.cssText = 'background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px;';
+            notice.style.cssText = 'background: var(--bs-warning-bg); border-left: 4px solid var(--bs-warning); padding: 15px; margin-bottom: 20px; color: var(--bs-warning-text);';
             notice.innerHTML = '<p>ℹ️ Only R5 members and admins can modify settings.</p>';
             form.parentNode.insertBefore(notice, form);
         }

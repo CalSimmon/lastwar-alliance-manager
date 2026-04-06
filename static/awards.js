@@ -717,22 +717,22 @@ function setupAwardSearch() {
         
         // Show suggestions
         if (inactiveMatches.length > 0 || allInactiveMatches.length > 0) {
-            let html = '<div style="padding: 10px; background: white; border-radius: 6px; border: 1px solid #dee2e6;">';
+            let html = '<div class="award-suggestions-box">';
             
             if (inactiveMatches.length > 0) {
-                html += '<strong style="display: block; color: #667eea; font-size: 0.9em; margin-bottom: 5px;">Hidden Awards:</strong>';
+                html += '<strong class="award-suggestions-label hidden-label">Hidden Awards:</strong>';
                 html += '<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">';
                 inactiveMatches.forEach(at => {
-                    html += `<button class="inactive-award-chip" data-award="${escapeHtml(at.name)}" data-action="activate" style="background: #e7f3ff; border-color: #667eea; cursor: pointer;">${escapeHtml(at.name)} <span style="color: #667eea;">↻</span></button>`;
+                    html += `<button class="inactive-award-chip award-chip-activate" data-award="${escapeHtml(at.name)}" data-action="activate">${escapeHtml(at.name)} <span class="chip-icon">↻</span></button>`;
                 });
                 html += '</div>';
             }
             
             if (allInactiveMatches.length > 0) {
-                html += '<strong style="display: block; color: #dc3545; font-size: 0.9em; margin-bottom: 5px;">Inactive Awards:</strong>';
+                html += '<strong class="award-suggestions-label inactive-label">Inactive Awards:</strong>';
                 html += '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
                 allInactiveMatches.forEach(at => {
-                    html += `<button class="inactive-award-chip" data-award="${escapeHtml(at.name)}" data-id="${at.id}" data-action="reactivate" style="background: #fff3cd; border-color: #ffc107; cursor: pointer; position: relative;">${escapeHtml(at.name)} <span style="color: #28a745;">↻</span> <span style="color: #dc3545; margin-left: 5px; font-weight: bold;" data-delete="${at.id}">✕</span></button>`;
+                    html += `<button class="inactive-award-chip award-chip-reactivate" data-award="${escapeHtml(at.name)}" data-id="${at.id}" data-action="reactivate">${escapeHtml(at.name)} <span class="chip-restore">↻</span> <span class="chip-delete" data-delete="${at.id}">✕</span></button>`;
                 });
                 html += '</div>';
             }
@@ -845,7 +845,7 @@ function setupAwardSearch() {
                 });
             });
         } else if (activeMatches.length > 0 && !exactMatch) {
-            let html = '<div style="padding: 10px; background: #d4edda; border-radius: 6px; border: 1px solid #c3e6cb; color: #155724; font-size: 0.9em;">';
+            let html = '<div class="award-similar-box">';
             html += '💡 Similar active awards: ';
             html += activeMatches.map(at => `<strong>${escapeHtml(at.name)}</strong>`).join(', ');
             html += '</div>';
