@@ -6732,3 +6732,22 @@ section:last-child {
         padding: 0.875rem 1.25rem;
     }
 }
+
+/* ── Footer ─────────────────────────────────── */
+.app-footer {
+    text-align: center;
+    padding: 1rem 1.5rem;
+    margin-top: 2rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.app-footer a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+.app-footer a:hover {
+    text-decoration: underline;
+}

@@ -51,9 +51,15 @@
             <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
         </nav>`;
 
+        const footer = `
+        <footer class="app-footer">
+            <span>&copy; ${new Date().getFullYear()} <a href="https://github.com/vervelak/lastwar-alliance-manager" target="_blank" rel="noopener noreferrer">Syneffo Ltd</a> &mdash; Last War Alliance Manager</span>
+        </footer>`;
+
         const container = document.querySelector('.container');
         if (!container) return;
         container.insertAdjacentHTML('afterbegin', html);
+        container.insertAdjacentHTML('beforeend', footer);
     }
 
     // Mark profile dropdown item as active when on profile page
