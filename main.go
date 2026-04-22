@@ -581,11 +581,11 @@ func loadConductorStats() (map[int]ConductorStat, float64, error) {
 		memberCount++
 	}
 
-	// Load backup usage dates (when conductor didn't show up)
+	// Load backup usage dates (when conductor didn't show up and backup actually conducted)
 	backupRows, err := db.Query(`
 		SELECT backup_id, MAX(date) as last_backup_used
 		FROM train_schedules
-		WHERE conductor_showed_up = 0
+		WHERE conductor_showed_up = 0 AND actual_conductor_id IS NULL
 		GROUP BY backup_id
 	`)
 	if err != nil {
@@ -614,6 +614,45 @@ func loadConductorStats() (map[int]ConductorStat, float64, error) {
 				LastDate:       nil,
 				LastBackupUsed: lastBackupUsedPtr,
 			}
+		}
+	}
+
+	// Load actual conductor dates (when backup assigned the train to another person)
+	actualRows, err := db.Query(`
+		SELECT actual_conductor_id, COUNT(*) as conductor_count, MAX(date) as last_date
+		FROM train_schedules
+		WHERE actual_conductor_id IS NOT NULL
+		GROUP BY actual_conductor_id
+	`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer actualRows.Close()
+
+	for actualRows.Next() {
+		var memberID, count int
+		var lastDate sql.NullString
+		if err := actualRows.Scan(&memberID, &count, &lastDate); err != nil {
+			return nil, 0, err
+		}
+		var lastDatePtr *string
+		if lastDate.Valid {
+			lastDatePtr = &lastDate.String
+		}
+
+		if stat, exists := conductorStats[memberID]; exists {
+			stat.Count += count
+			if lastDatePtr != nil && (stat.LastDate == nil || *lastDatePtr > *stat.LastDate) {
+				stat.LastDate = lastDatePtr
+			}
+			conductorStats[memberID] = stat
+		} else {
+			conductorStats[memberID] = ConductorStat{
+				Count:    count,
+				LastDate: lastDatePtr,
+			}
+			totalConductorCount += count
+			memberCount++
 		}
 	}
 
