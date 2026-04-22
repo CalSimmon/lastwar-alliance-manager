@@ -6052,11 +6052,28 @@ func parseVSPointsText(text string) []struct {
 
 	lines := strings.Split(text, "\n")
 
-	// Pattern for VS points - similar to power rankings but with different number ranges
-	// VS points are typically 6-9 digits (100k to 999M range)
-	// Examples: "Gary6126 30598466", "Gargoland 23660312"
-	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]*?)\s+([0-9]{6,})`)
-	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_]+)\s+([0-9]{6,})`)
+	// Number pattern: plain 6+ digits OR comma-formatted (19,291,992)
+	numPat := `([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,})`
+
+	// Pattern 1: leading rank digit + name + optional alliance tag + number
+	// "1 Malata90 [RSRP] Reset Reapers 48,898,988"
+	rankPrefixPattern := regexp.MustCompile(`^[0-9]{1,3}\s+([A-Za-z][A-Za-z0-9_\s]+?)\s+(?:\[[^\]]*\][^0-9]*)?\s*` + numPat)
+
+	// Pattern 2: name then alliance tag then number
+	// "Gone Quixote [RSRP] Reset Reapers 22,222,922"
+	alliancePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+\[[^\]]*\][^0-9]*` + numPat)
+
+	// Pattern 3: optional R-badge prefix, name, number
+	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]*?)\s+` + numPat)
+
+	// Pattern 4: simple name + number
+	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+` + numPat)
+
+	// Pre-compiled helpers
+	whitespaceRe := regexp.MustCompile(`\s+`)
+	nonDigitRe := regexp.MustCompile(`[^0-9]`)
+	skipLineRe := regexp.MustCompile(`^[0-9]{1,3}\.?$`)
+	dayRe := regexp.MustCompile(`^(mon|tues|wed|thur|fri|sat|sun)\.?$`)
 
 	// Track seen names to avoid duplicates
 	seenNames := make(map[string]bool)
@@ -6067,8 +6084,8 @@ func parseVSPointsText(text string) []struct {
 			continue
 		}
 
-		// Skip lines that are clearly UI elements
-		if len(line) < 5 {
+		// Skip lines that are clearly UI elements or bare rank numbers
+		if len(line) < 5 || skipLineRe.MatchString(line) {
 			continue
 		}
 
@@ -6077,35 +6094,37 @@ func parseVSPointsText(text string) []struct {
 		if strings.Contains(lowerLine, "ranking") ||
 			strings.Contains(lowerLine, "commander") ||
 			strings.Contains(lowerLine, "points") ||
-			strings.Contains(lowerLine, "daily") ||
-			strings.Contains(lowerLine, "weekly") ||
-			strings.Contains(lowerLine, "mon") ||
-			strings.Contains(lowerLine, "tues") ||
-			strings.Contains(lowerLine, "wed") ||
-			strings.Contains(lowerLine, "thur") ||
-			strings.Contains(lowerLine, "fri") ||
-			strings.Contains(lowerLine, "sat") ||
-			strings.Contains(lowerLine, "alliance") ||
-			strings.Contains(lowerLine, "your alliance") {
+			strings.Contains(lowerLine, "daily rank") ||
+			strings.Contains(lowerLine, "weekly rank") ||
+			strings.Contains(lowerLine, "your alliance") ||
+			dayRe.MatchString(lowerLine) {
 			continue
 		}
 
-		// Try patterns
-		matches := rankPattern.FindStringSubmatch(line)
+		// Try patterns in priority order
+		matches := rankPrefixPattern.FindStringSubmatch(line)
+		if len(matches) == 0 {
+			matches = alliancePattern.FindStringSubmatch(line)
+		}
+		if len(matches) == 0 {
+			matches = rankPattern.FindStringSubmatch(line)
+		}
 		if len(matches) == 0 {
 			matches = simplePattern.FindStringSubmatch(line)
 		}
 
 		if len(matches) >= 3 {
 			name := strings.TrimSpace(matches[1])
+			name = whitespaceRe.ReplaceAllString(name, " ")
+
 			pointsStr := strings.ReplaceAll(matches[2], ",", "")
-			pointsStr = strings.ReplaceAll(pointsStr, " ", "")
+			pointsStr = nonDigitRe.ReplaceAllString(pointsStr, "")
 
 			points, err := strconv.ParseInt(pointsStr, 10, 64)
 
-			// Validate: points should be realistic (10k to 999M range), name should be reasonable
+			// Validate: points realistic range, name length reasonable
 			if err == nil && points >= 10000 && points <= 999999999 &&
-				len(name) >= 3 && len(name) <= 30 && !seenNames[name] {
+				len(name) >= 4 && len(name) <= 30 && !seenNames[name] {
 				records = append(records, struct {
 					MemberName string `json:"member_name"`
 					Points     int64  `json:"points"`
