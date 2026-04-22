@@ -1,8 +1,8 @@
-const API_URL = '/api/dyno-recommendations';
+const API_URL = '/api/conduct-reports';
 const MEMBERS_URL = '/api/members';
 
 let allMembers = [];
-let allDynoRecs = [];
+let allConductReports = [];
 let currentUsername = '';
 let currentUserId = 0;
 let currentView = 'list'; // 'list' or 'grouped'
@@ -158,31 +158,31 @@ function setupMemberSearch() {
     });
 }
 
-// Load dyno recommendations
-async function loadDynoRecommendations() {
+// Load conduct reports
+async function loadConductReports() {
     try {
         const response = await fetch(API_URL);
-        allDynoRecs = await response.json();
+        allConductReports = await response.json();
         updateStatistics();
         updateCharts();
-        renderDynoRecommendations();
+        renderConductReports();
     } catch (error) {
-        console.error('Error loading dyno recommendations:', error);
-        alert('Failed to load dyno recommendations.');
+        console.error('Error loading conduct reports:', error);
+        alert('Failed to load conduct reports.');
     }
 }
 
 // Update statistics dashboard
 function updateStatistics() {
-    const active = allDynoRecs.filter(r => !r.expired);
-    const expired = allDynoRecs.filter(r => r.expired);
+    const active = allConductReports.filter(r => !r.expired);
+    const expired = allConductReports.filter(r => r.expired);
     const positive = active.filter(r => r.points > 0);
     const negative = active.filter(r => r.points < 0);
     
-    document.getElementById('total-dyno').textContent = active.length;
-    document.getElementById('positive-dyno').textContent = positive.length;
-    document.getElementById('negative-dyno').textContent = negative.length;
-    document.getElementById('expired-dyno').textContent = expired.length;
+    document.getElementById('total-reports').textContent = active.length;
+    document.getElementById('positive-reports').textContent = positive.length;
+    document.getElementById('negative-reports').textContent = negative.length;
+    document.getElementById('expired-reports').textContent = expired.length;
 }
 
 // Update all charts
@@ -197,7 +197,7 @@ function updatePointsChart() {
     const ctx = document.getElementById('points-chart');
     if (!ctx) return;
     
-    const active = allDynoRecs.filter(r => !r.expired);
+    const active = allConductReports.filter(r => !r.expired);
     const positiveCount = active.filter(r => r.points > 0).length;
     const negativeCount = active.filter(r => r.points < 0).length;
     const neutralCount = active.filter(r => r.points === 0).length;
@@ -257,7 +257,7 @@ function updateMembersChart() {
     const ctx = document.getElementById('members-chart');
     if (!ctx) return;
     
-    const active = allDynoRecs.filter(r => !r.expired);
+    const active = allConductReports.filter(r => !r.expired);
     
     // Calculate net points per member
     const memberPoints = {};
@@ -351,7 +351,7 @@ function updateTimelineChart() {
     // Count recommendations per day
     const positiveData = days.map(date => {
         const dateStr = formatDateOnly(date);
-        return allDynoRecs.filter(rec => {
+        return allConductReports.filter(rec => {
             const recDate = formatDateOnly(new Date(rec.created_at));
             return recDate === dateStr && rec.points > 0;
         }).length;
@@ -359,7 +359,7 @@ function updateTimelineChart() {
     
     const negativeData = days.map(date => {
         const dateStr = formatDateOnly(date);
-        return allDynoRecs.filter(rec => {
+        return allConductReports.filter(rec => {
             const recDate = formatDateOnly(new Date(rec.created_at));
             return recDate === dateStr && rec.points < 0;
         }).length;
@@ -407,7 +407,7 @@ function updateTimelineChart() {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `${context.dataset.label}: ${context.parsed.y} dynos`;
+                            return `${context.dataset.label}: ${context.parsed.y} reports`;
                         }
                     }
                 }
@@ -440,13 +440,13 @@ function formatDateOnly(date) {
     return `${year}-${month}-${day}`;
 }
 
-// Render dyno recommendations
-function renderDynoRecommendations() {
-    const container = document.getElementById('dyno-list');
+// Render conduct reports
+function renderConductReports() {
+    const container = document.getElementById('conduct-list');
     const filterSearch = document.getElementById('filter-search').value.toLowerCase();
     
     // Apply filter
-    let filtered = allDynoRecs.filter(rec => {
+    let filtered = allConductReports.filter(rec => {
         const memberMatch = rec.member_name.toLowerCase().includes(filterSearch);
         const creatorMatch = rec.created_by.toLowerCase().includes(filterSearch);
         const searchMatch = !filterSearch || memberMatch || creatorMatch;
@@ -466,7 +466,7 @@ function renderDynoRecommendations() {
     });
     
     if (filtered.length === 0) {
-        container.innerHTML = '<p class="no-data">No dyno recommendations found.</p>';
+        container.innerHTML = '<p class="no-data">No conduct reports found.</p>';
         return;
     }
     
@@ -482,7 +482,7 @@ function renderListView(recs, container) {
     container.innerHTML = '';
     
     recs.forEach(rec => {
-        const card = createDynoCard(rec);
+        const card = createConductCard(rec);
         container.appendChild(card);
     });
 }
@@ -515,7 +515,7 @@ function renderGroupedView(recs, container) {
                 <div class="member-info">
                     <span class="member-name">${group.member.name}</span>
                     <span class="rank-badge rank-${group.member.rank.toLowerCase()}">${group.member.rank}</span>
-                    <span class="dyno-count">${activeRecs.length} active</span>
+                    <span class="conduct-count">${activeRecs.length} active</span>
                 </div>
                 <div class="member-total-points ${totalPoints >= 0 ? 'positive' : 'negative'}">
                     ${totalPoints > 0 ? '+' : ''}${totalPoints} pts
@@ -526,7 +526,7 @@ function renderGroupedView(recs, container) {
         
         const recsContainer = groupCard.querySelector('.grouped-recommendations');
         group.recommendations.forEach(rec => {
-            const card = createDynoCard(rec, true);
+            const card = createConductCard(rec, true);
             recsContainer.appendChild(card);
         });
         
@@ -534,8 +534,8 @@ function renderGroupedView(recs, container) {
     });
 }
 
-// Create dyno recommendation card
-function createDynoCard(rec, compact = false) {
+// Create conduct report card
+function createConductCard(rec, compact = false) {
     const card = document.createElement('div');
     card.className = `recommendation-card ${rec.expired ? 'expired' : ''}`;
     
@@ -571,7 +571,7 @@ function createDynoCard(rec, compact = false) {
                 <span class="expiry-badge ${rec.expired ? 'expired' : ''}">${expiryText}</span>
             </div>
             ${rec.created_by_id === currentUserId ? `
-                <button class="delete-btn" onclick="deleteDynoRecommendation(${rec.id})">🗑️ Delete</button>
+                <button class="delete-btn" onclick="deleteConductReport(${rec.id})">🗑️ Delete</button>
             ` : ''}
         </div>
     `;
@@ -579,8 +579,8 @@ function createDynoCard(rec, compact = false) {
     return card;
 }
 
-// Submit dyno recommendation
-async function submitDynoRecommendation() {
+// Submit conduct report
+async function submitConductReport() {
     const memberId = parseInt(document.getElementById('member-select').value);
     const points = parseInt(document.getElementById('points-input').value);
     const notes = document.getElementById('notes-input').value.trim();
@@ -619,18 +619,18 @@ async function submitDynoRecommendation() {
         document.getElementById('notes-input').value = '';
         
         // Reload recommendations
-        await loadDynoRecommendations();
+        await loadConductReports();
         
-        alert('Dyno recommendation submitted successfully!');
+        alert('Conduct report submitted successfully!');
     } catch (error) {
-        console.error('Error submitting dyno recommendation:', error);
-        alert('Failed to submit dyno recommendation: ' + error.message);
+        console.error('Error submitting conduct report:', error);
+        alert('Failed to submit conduct report: ' + error.message);
     }
 }
 
-// Delete dyno recommendation
-async function deleteDynoRecommendation(id) {
-    if (!confirm('Are you sure you want to delete this dyno recommendation?')) {
+// Delete conduct report
+async function deleteConductReport(id) {
+    if (!confirm('Are you sure you want to delete this conduct report?')) {
         return;
     }
     
@@ -640,13 +640,13 @@ async function deleteDynoRecommendation(id) {
         });
         
         if (!response.ok) {
-            throw new Error('Failed to delete dyno recommendation');
+            throw new Error('Failed to delete conduct report');
         }
         
-        await loadDynoRecommendations();
+        await loadConductReports();
     } catch (error) {
-        console.error('Error deleting dyno recommendation:', error);
-        alert('Failed to delete dyno recommendation.');
+        console.error('Error deleting conduct report:', error);
+        alert('Failed to delete conduct report.');
     }
 }
 
@@ -676,14 +676,14 @@ function setupViewToggle() {
         currentView = 'list';
         listBtn.classList.add('active');
         groupedBtn.classList.remove('active');
-        renderDynoRecommendations();
+        renderConductReports();
     });
     
     groupedBtn.addEventListener('click', () => {
         currentView = 'grouped';
         groupedBtn.classList.add('active');
         listBtn.classList.remove('active');
-        renderDynoRecommendations();
+        renderConductReports();
     });
 }
 
@@ -696,14 +696,14 @@ function setupFilters() {
             filterChips.forEach(c => c.classList.remove('active'));
             chip.classList.add('active');
             currentFilter = chip.dataset.filter;
-            renderDynoRecommendations();
+            renderConductReports();
         });
     });
     
     // Search filter
     const searchInput = document.getElementById('filter-search');
     searchInput.addEventListener('input', () => {
-        renderDynoRecommendations();
+        renderConductReports();
     });
 }
 
@@ -714,14 +714,14 @@ async function init() {
     
     await setupEventListeners();
     await loadMembers();
-    await loadDynoRecommendations();
+    await loadConductReports();
     
     setupMemberSearch();
     setupViewToggle();
     setupFilters();
     
     // Submit button
-    document.getElementById('submit-dyno-btn').addEventListener('click', submitDynoRecommendation);
+    document.getElementById('submit-conduct-btn').addEventListener('click', submitConductReport);
 }
 
 // Run on page load

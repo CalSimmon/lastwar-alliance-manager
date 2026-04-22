@@ -115,7 +115,7 @@ type Recommendation struct {
 	Expired         bool   `json:"expired"`
 }
 
-type DynoRecommendation struct {
+type ConductReport struct {
 	ID          int    `json:"id"`
 	MemberID    int    `json:"member_id"`
 	MemberName  string `json:"member_name"`
@@ -1074,7 +1074,7 @@ func initDB() error {
 		return err
 	}
 
-	// Create dyno recommendations table (informal feedback that expires after 1 week)
+	// Create conduct reports table (officer notes that expire after 1 week)
 	createDynoRecommendationsSQL := `CREATE TABLE IF NOT EXISTS dyno_recommendations (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		member_id INTEGER NOT NULL,
@@ -3519,8 +3519,8 @@ func deleteRecommendation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Get dyno recommendations (expires after 1 week)
-func getDynoRecommendations(w http.ResponseWriter, r *http.Request) {
+// Get conduct reports (expires after 1 week)
+func getConductReports(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
 		SELECT 
 			dr.id, 
@@ -3547,9 +3547,9 @@ func getDynoRecommendations(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	dynoRecs := []DynoRecommendation{}
+	conductReports := []ConductReport{}
 	for rows.Next() {
-		var dr DynoRecommendation
+		var dr ConductReport
 		if err := rows.Scan(&dr.ID, &dr.MemberID, &dr.MemberName, &dr.MemberRank,
 			&dr.Points, &dr.Notes, &dr.CreatedBy, &dr.CreatedByID, &dr.CreatedAt, &dr.Expired); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3562,8 +3562,8 @@ func getDynoRecommendations(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dynoRecs)
 }
 
-// Create dyno recommendation
-func createDynoRecommendation(w http.ResponseWriter, r *http.Request) {
+// Create conduct report
+func createConductReport(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	userID := session.Values["user_id"].(int)
 
@@ -3607,8 +3607,8 @@ func createDynoRecommendation(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := result.LastInsertId()
 
-	// Get the created dyno recommendation
-	var dr DynoRecommendation
+	// Get the created conduct report
+	var dr ConductReport
 	err = db.QueryRow(`
 		SELECT 
 			dr.id, 
@@ -3641,8 +3641,8 @@ func createDynoRecommendation(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dr)
 }
 
-// Delete dyno recommendation
-func deleteDynoRecommendation(w http.ResponseWriter, r *http.Request) {
+// Delete conduct report
+func deleteConductReport(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	userID := session.Values["user_id"].(int)
 	isAdmin := session.Values["is_admin"].(bool)
@@ -3659,7 +3659,7 @@ func deleteDynoRecommendation(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow("SELECT created_by_id FROM dyno_recommendations WHERE id = ?", id).Scan(&createdByID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Dyno recommendation not found", http.StatusNotFound)
+			http.Error(w, "Conduct report not found", http.StatusNotFound)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -3667,7 +3667,7 @@ func deleteDynoRecommendation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if createdByID != userID && !isAdmin {
-		http.Error(w, "You can only delete your own dyno recommendations", http.StatusForbidden)
+		http.Error(w, "You can only delete your own conduct reports", http.StatusForbidden)
 		return
 	}
 
@@ -6582,10 +6582,10 @@ func main() {
 	router.HandleFunc("/api/recommendations", authMiddleware(createRecommendation)).Methods("POST")
 	router.HandleFunc("/api/recommendations/{id}", authMiddleware(deleteRecommendation)).Methods("DELETE")
 
-	// Dyno Recommendations routes (protected)
-	router.HandleFunc("/api/dyno-recommendations", authMiddleware(getDynoRecommendations)).Methods("GET")
-	router.HandleFunc("/api/dyno-recommendations", authMiddleware(createDynoRecommendation)).Methods("POST")
-	router.HandleFunc("/api/dyno-recommendations/{id}", authMiddleware(deleteDynoRecommendation)).Methods("DELETE")
+	// Conduct Reports routes (protected)
+	router.HandleFunc("/api/conduct-reports", authMiddleware(getConductReports)).Methods("GET")
+	router.HandleFunc("/api/conduct-reports", authMiddleware(createConductReport)).Methods("POST")
+	router.HandleFunc("/api/conduct-reports/{id}", authMiddleware(deleteConductReport)).Methods("DELETE")
 
 	// Settings routes (protected)
 	router.HandleFunc("/api/settings", authMiddleware(getSettings)).Methods("GET")

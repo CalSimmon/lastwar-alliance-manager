@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dyno Recommendations - Last War Alliance</title>
+    <title>Conduct Reports - Last War Alliance</title>
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
     <script src="navigation.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body data-h1="💬 Last War: Survival" data-subtitle="Dyno Recommendations">
+<body data-h1="💬 Last War: Survival" data-subtitle="Conduct Reports">
     <div class="container">
 
         <main>
@@ -18,41 +18,41 @@
                 <div class="info-content">
                     <div class="info-icon">ℹ️</div>
                     <div class="info-text">
-                        <strong>About Dyno Recommendations:</strong> 
-                        Quick informal feedback system for members. Can be positive (+) or negative (-) points. 
-                        These are just notices and don't affect rankings. All recommendations automatically expire after 1 week.
+                        <strong>About Conduct Reports:</strong>
+                        Officer notes on member conduct. Can be positive (+) or negative (-) points.
+                        These are notices only and don't affect rankings. All reports automatically expire after 1 week.
                     </div>
                 </div>
             </section>
 
             <section class="stats-dashboard">
-                <h3>📊 Dyno Statistics</h3>
+                <h3>📊 Conduct Report Statistics</h3>
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon">💬</div>
                         <div class="stat-content">
-                            <div class="stat-value" id="total-dyno">0</div>
+                            <div class="stat-value" id="total-reports">0</div>
                             <div class="stat-label">Total Active</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">✅</div>
                         <div class="stat-content">
-                            <div class="stat-value" id="positive-dyno">0</div>
+                            <div class="stat-value" id="positive-reports">0</div>
                             <div class="stat-label">Positive</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">❌</div>
                         <div class="stat-content">
-                            <div class="stat-value" id="negative-dyno">0</div>
+                            <div class="stat-value" id="negative-reports">0</div>
                             <div class="stat-label">Negative</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">⏱️</div>
                         <div class="stat-content">
-                            <div class="stat-value" id="expired-dyno">0</div>
+                            <div class="stat-value" id="expired-reports">0</div>
                             <div class="stat-label">Expired</div>
                         </div>
                     </div>
@@ -60,7 +60,7 @@
             </section>
 
             <section class="charts-section">
-                <h3>📈 Dyno Analytics</h3>
+                <h3>📈 Conduct Analytics</h3>
                 <div class="charts-grid">
                     <div class="chart-container">
                         <h4>Points Distribution</h4>
@@ -71,14 +71,14 @@
                         <canvas id="members-chart"></canvas>
                     </div>
                     <div class="chart-container full-width">
-                        <h4>Daily Dyno Activity (Last 7 Days)</h4>
+                        <h4>Daily Report Activity (Last 7 Days)</h4>
                         <canvas id="timeline-chart"></canvas>
                     </div>
                 </div>
             </section>
 
             <section class="recommendation-form-section">
-                <h3>➕ Add Dyno Recommendation</h3>
+                <h3>➕ Add Conduct Report</h3>
                 <div class="recommendation-form">
                     <div class="form-group">
                         <label for="member-select">Member:</label>
@@ -96,13 +96,13 @@
                         <label for="notes-input">Notes (Required):</label>
                         <textarea id="notes-input" class="notes-input" rows="3" placeholder="Provide context for this recommendation..." required></textarea>
                     </div>
-                    <button id="submit-dyno-btn" class="btn-primary">✨ Submit Dyno Recommendation</button>
+                    <button id="submit-conduct-btn" class="btn-primary">✨ Submit Conduct Report</button>
                 </div>
             </section>
 
             <section class="recommendations-list-section">
                 <div class="section-header-controls">
-                    <h3>📋 Dyno Recommendations</h3>
+                    <h3>📋 Conduct Reports</h3>
                     <div class="view-toggle">
                         <button class="toggle-btn active" data-view="list" id="list-view-btn">📄 List View</button>
                         <button class="toggle-btn" data-view="grouped" id="grouped-view-btn">👥 Grouped by Member</button>
@@ -115,17 +115,17 @@
                         <button class="filter-chip" data-filter="active">Active Only</button>
                         <button class="filter-chip" data-filter="positive">Positive</button>
                         <button class="filter-chip" data-filter="negative">Negative</button>
-                        <button class="filter-chip" data-filter="mine">My Dynos</button>
+                        <button class="filter-chip" data-filter="mine">My Reports</button>
                     </div>
                 </div>
-                <div id="dyno-list" class="recommendations-list">
-                    <!-- Dyno recommendations will be loaded here -->
+                <div id="conduct-list" class="recommendations-list">
+                    <!-- Conduct reports will be loaded here -->
                 </div>
             </section>
         </main>
     </div>
 
     <script src="theme.js"></script>
-    <script src="dyno.js"></script>
+    <script src="conduct.js"></script>
 </body>
 </html>

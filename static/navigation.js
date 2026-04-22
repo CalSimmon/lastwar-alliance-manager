@@ -42,7 +42,7 @@
             <a href="/train.html" class="nav-link">🚂 Train</a>
             <a href="/awards.html" class="nav-link">🏆 Awards</a>
             <a href="/recommendations.html" class="nav-link">⭐ Recs</a>
-            <a href="/dyno.html" class="nav-link">💬 Dyno</a>
+            <a href="/conduct.html" class="nav-link">📋 Conduct Reports</a>
             <a href="/rankings.html" class="nav-link">📊 Rankings</a>
             <a href="/storm.html" class="nav-link">🏜️ Storm</a>
             <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
