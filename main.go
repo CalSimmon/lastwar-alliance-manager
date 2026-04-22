@@ -5340,21 +5340,33 @@ func parsePowerRankingsText(text string) []struct {
 
 	lines := strings.Split(text, "\n")
 
-	// Pattern specifically for Last War rankings format
-	// Matches: optional rank badge (R4, R3), name (can have spaces), then large power number
-	// Examples: "R4 Gary6126 77421000", "Nutty Tx 61926102", "R3 DYNOSUR 63785308"
-	// Updated to better handle multi-word names
-	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]+?)\s+([0-9]{7,})`)
+	// Number pattern matches both plain (77421000) and comma-formatted (48,898,988)
+	numPat := `([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{7,})`
 
-	// Alternative simpler pattern: captures name with spaces followed by 7+ digit number
-	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+([0-9]{7,})`)
+	// Pattern 1: optional alliance rank badge (R4/R3) prefix, name, then number
+	// "R4 Gary6126 77421000"
+	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]+?)\s+` + numPat)
 
-	// Pattern for lines with rank number prefix: "1 Gary6126 R4 77421000" or "1 ileesu R4 66715876"
-	rankPrefixPattern := regexp.MustCompile(`^[0-9]{1,3}\s+([A-Za-z][A-Za-z0-9_\s]+?)\s+(?:R[0-9]\s+)?([0-9]{7,})`)
+	// Pattern 2: rank-number-prefix format: "1 Malata90 [RSRP] Reset Reapers 48,898,988"
+	// strips the leading rank digit(s) and optional alliance tag before the number
+	rankPrefixPattern := regexp.MustCompile(`^[0-9]{1,3}\s+([A-Za-z][A-Za-z0-9_\s]+?)\s+(?:\[[^\]]*\][^\d]*)?\s*` + numPat)
 
-	// Flexible pattern that allows letters in power (for OCR errors): "B 25) Nutty Tx s1926102"
-	// This captures name followed by 7+ chars that may contain letters misread as digits
+	// Pattern 3: name then alliance-tag then number (alliance tag stripped)
+	// "Gone Quixote [RSRP] Reset Reapers 22,222,922"
+	alliancePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+\[[^\]]*\][^0-9]*` + numPat)
+
+	// Pattern 4: simple – any letter-starting word(s) followed by number
+	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+` + numPat)
+
+	// Pattern 5: flexible (allows letters in number for heavy OCR errors)
 	flexiblePattern := regexp.MustCompile(`(?:[A-Z]{1,3}\s+)?(?:\d+\)?\s+)?([A-Za-z][A-Za-z0-9_\s]+?)\s+([A-Za-z0-9]{7,})`)
+
+	// Compiled helpers (outside loop for efficiency)
+	whitespaceRe := regexp.MustCompile(`\s+`)
+	nonDigitRe := regexp.MustCompile(`[^0-9]`)
+	digitRe := regexp.MustCompile(`[0-9]`)
+	skipLineRe := regexp.MustCompile(`^[0-9]{1,3}\.?$`)
+	dayRe := regexp.MustCompile(`^(mon|tues|wed|thur|fri|sat|sun)\.?$`)
 
 	// Track seen names to avoid duplicates from multi-line OCR
 	seenNames := make(map[string]bool)
@@ -5365,8 +5377,8 @@ func parsePowerRankingsText(text string) []struct {
 			continue
 		}
 
-		// Skip lines that are clearly UI elements or rank numbers
-		if len(line) < 5 || regexp.MustCompile(`^[0-9]{1,2}$`).MatchString(line) {
+		// Skip lines that are clearly UI elements or short rank numbers
+		if len(line) < 5 || skipLineRe.MatchString(line) {
 			continue
 		}
 
@@ -5376,15 +5388,23 @@ func parsePowerRankingsText(text string) []struct {
 			strings.Contains(lowerLine, "commander") ||
 			strings.Contains(lowerLine, "power") ||
 			strings.Contains(lowerLine, "kills") ||
-			strings.Contains(lowerLine, "donation") {
+			strings.Contains(lowerLine, "donation") ||
+			strings.Contains(lowerLine, "daily rank") ||
+			strings.Contains(lowerLine, "weekly rank") ||
+			strings.Contains(lowerLine, "your alliance") ||
+			dayRe.MatchString(lowerLine) {
 			continue
 		}
 
-		// Try rank pattern first (for lines with R4, R3, etc.)
-		matches := rankPattern.FindStringSubmatch(line)
+		// Try rank-number prefix first (e.g. "1 Malata90 [RSRP] Reset Reapers 48,898,988")
+		matches := rankPrefixPattern.FindStringSubmatch(line)
 		if len(matches) == 0 {
-			// Try pattern with rank number prefix
-			matches = rankPrefixPattern.FindStringSubmatch(line)
+			// Try alliance pattern (e.g. "Gone Quixote [RSRP] Reset Reapers 22,222,922")
+			matches = alliancePattern.FindStringSubmatch(line)
+		}
+		if len(matches) == 0 {
+			// Try rank badge pattern (R4/R3 prefix)
+			matches = rankPattern.FindStringSubmatch(line)
 		}
 		if len(matches) == 0 {
 			// Try simple pattern
@@ -5396,9 +5416,20 @@ func parsePowerRankingsText(text string) []struct {
 		}
 
 		if len(matches) >= 3 {
+			// For the flexible pattern (which allows letters in the number), require
+			// at least 6 raw digit characters to avoid false positives from garbled text.
+			if rawDigits := len(digitRe.FindAllString(matches[2], -1)); rawDigits < 6 {
+				if flexiblePattern.MatchString(line) && !rankPrefixPattern.MatchString(line) &&
+					!alliancePattern.MatchString(line) && !rankPattern.MatchString(line) &&
+					!simplePattern.MatchString(line) {
+					log.Printf("Skipping low-confidence flexible match on %q (only %d digits)", line, rawDigits)
+					continue
+				}
+			}
+
 			name := strings.TrimSpace(matches[1])
 			// Clean up extra whitespace in names
-			name = regexp.MustCompile(`\s+`).ReplaceAllString(name, " ")
+			name = whitespaceRe.ReplaceAllString(name, " ")
 
 			powerStr := strings.ReplaceAll(matches[2], ",", "")
 			powerStr = strings.ReplaceAll(powerStr, " ", "")
@@ -5416,13 +5447,14 @@ func parsePowerRankingsText(text string) []struct {
 			powerStr = strings.ReplaceAll(powerStr, "g", "9") // g sometimes misread as 9
 			powerStr = strings.ReplaceAll(powerStr, "G", "6") // G sometimes misread as 6
 			// Remove any remaining non-digit characters
-			powerStr = regexp.MustCompile(`[^0-9]`).ReplaceAllString(powerStr, "")
+			powerStr = nonDigitRe.ReplaceAllString(powerStr, "")
 
 			power, err := strconv.ParseInt(powerStr, 10, 64)
 
 			// Validate: power should be realistic (1M to 1B range), name should be reasonable
+			// Min name length 4 avoids false positives from garbled OCR short tokens.
 			if err == nil && power >= 1000000 && power <= 9999999999 &&
-				len(name) >= 3 && len(name) <= 30 && !seenNames[name] {
+				len(name) >= 4 && len(name) <= 30 && !seenNames[name] {
 				records = append(records, struct {
 					MemberName string `json:"member_name"`
 					Power      int64  `json:"power"`
