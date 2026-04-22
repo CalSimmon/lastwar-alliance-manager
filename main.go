@@ -3555,11 +3555,11 @@ func getConductReports(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		dynoRecs = append(dynoRecs, dr)
+		conductReports = append(conductReports, dr)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(dynoRecs)
+	json.NewEncoder(w).Encode(conductReports)
 }
 
 // Create conduct report
