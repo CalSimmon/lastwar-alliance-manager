@@ -273,8 +273,12 @@
             if (e.target === this) closeDeleteModal();
         });
 
-        setupDropdown();
-        checkAuth().then(ok => { if (ok) loadArchivedMembers(); });
+        // navigation.js injects the header on DOMContentLoaded, so we must wait
+        // for that to complete before attaching dropdown listeners / fetching auth.
+        document.addEventListener('DOMContentLoaded', () => {
+            setupDropdown();
+            checkAuth().then(ok => { if (ok) loadArchivedMembers(); });
+        });
     </script>
 </body>
 </html>
