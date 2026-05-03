@@ -12,23 +12,23 @@
     --bg-gradient-end: #5d331a;
     --container-bg: #f4eee6;
     --text-primary: #241a13;
-    --text-secondary: #5d4838;
-    --text-muted: #7d6758;
+    --text-secondary: #4f3c2f;
+    --text-muted: #695244;
     --card-bg: #fff9f2;
     --border-color: #d7c1aa;
     --input-bg: #fffdf8;
     --input-border: #cbb39a;
-    --accent-primary: #c96d1f;
-    --accent-secondary: #7c2414;
-    --hover-bg: rgba(201, 109, 31, 0.06);
+    --accent-primary: #a75018;
+    --accent-secondary: #5e1f13;
+    --hover-bg: rgba(167, 80, 24, 0.06);
     --primary-gradient: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
     --accent-glow: 0 8px 24px rgba(124, 36, 20, 0.25);
     --accent-focus-ring: 0 0 0 2px rgba(201, 109, 31, 0.14);
-    --accent-bg-subtle: rgba(201, 109, 31, 0.05);
-    --accent-bg-hover: rgba(201, 109, 31, 0.09);
-    --accent-bg-active: rgba(201, 109, 31, 0.12);
-    --accent-bg-light: rgba(201, 109, 31, 0.2);
-    --tap-highlight: rgba(201, 109, 31, 0.3);
+    --accent-bg-subtle: rgba(167, 80, 24, 0.06);
+    --accent-bg-hover: rgba(167, 80, 24, 0.1);
+    --accent-bg-active: rgba(167, 80, 24, 0.14);
+    --accent-bg-light: rgba(167, 80, 24, 0.24);
+    --tap-highlight: rgba(167, 80, 24, 0.3);
     --admin-gradient: linear-gradient(135deg, #8b1e16 0%, #c2410c 100%);
     --admin-gradient-hover: linear-gradient(135deg, #9f2418 0%, #d95510 100%);
     --admin-link-text: #fff6ed;
@@ -277,22 +277,22 @@ html.theme-light {
     --bg-gradient-end: #5d331a;
     --container-bg: #f4eee6;
     --text-primary: #241a13;
-    --text-secondary: #5d4838;
-    --text-muted: #7d6758;
+    --text-secondary: #4f3c2f;
+    --text-muted: #695244;
     --card-bg: #fff9f2;
     --border-color: #d7c1aa;
     --input-bg: #fffdf8;
     --input-border: #cbb39a;
-    --accent-primary: #c96d1f;
-    --accent-secondary: #7c2414;
-    --hover-bg: rgba(201, 109, 31, 0.06);
+    --accent-primary: #a75018;
+    --accent-secondary: #5e1f13;
+    --hover-bg: rgba(167, 80, 24, 0.06);
     --accent-glow: 0 8px 24px rgba(124, 36, 20, 0.25);
     --accent-focus-ring: 0 0 0 2px rgba(201, 109, 31, 0.14);
-    --accent-bg-subtle: rgba(201, 109, 31, 0.05);
-    --accent-bg-hover: rgba(201, 109, 31, 0.09);
-    --accent-bg-active: rgba(201, 109, 31, 0.12);
-    --accent-bg-light: rgba(201, 109, 31, 0.2);
-    --tap-highlight: rgba(201, 109, 31, 0.3);
+    --accent-bg-subtle: rgba(167, 80, 24, 0.06);
+    --accent-bg-hover: rgba(167, 80, 24, 0.1);
+    --accent-bg-active: rgba(167, 80, 24, 0.14);
+    --accent-bg-light: rgba(167, 80, 24, 0.24);
+    --tap-highlight: rgba(167, 80, 24, 0.3);
     --shadow-focus: 0 0 0 3px rgba(201, 109, 31, 0.18);
     --admin-gradient: linear-gradient(135deg, #8b1e16 0%, #c2410c 100%);
     --admin-gradient-hover: linear-gradient(135deg, #9f2418 0%, #d95510 100%);
@@ -530,7 +530,7 @@ header .user-info {
 
 .dropdown-item:hover {
     background: var(--card-bg);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
 }
 
 .dropdown-item:active {
@@ -545,7 +545,7 @@ header .user-info {
 
 .admin-only {
     background: var(--accent-bg-active);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     font-weight: bold;
 }
 
@@ -588,7 +588,7 @@ header .user-info {
 
 .theme-option.active {
     background: var(--accent-bg-active);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     font-weight: 600;
 }
 
@@ -734,13 +734,13 @@ header .user-info {
 
 .nav-link:hover {
     background: var(--accent-bg-hover);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     padding-left: 2rem;
 }
 
 .nav-link.active {
     background: var(--accent-bg-active);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     font-weight: 700;
 }
 
@@ -5405,9 +5405,10 @@ button {
 }
 
 .tab-button.active {
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     border-bottom-color: var(--accent-primary);
     background: var(--accent-bg-active);
+    font-weight: 700;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -5441,9 +5442,9 @@ button {
 
 .user-card:hover {
     background: var(--card-bg);
-    border-color: rgba(102, 126, 234, 0.5);
+    border-color: var(--accent-primary);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    box-shadow: 0 4px 12px rgba(167, 80, 24, 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -5821,7 +5822,7 @@ button {
     padding: 60px 20px;
     color: var(--text-secondary);
     font-size: 1.1em;
-    opacity: 0.8;
+    opacity: 1;
 }
 
 .loading {
@@ -5997,7 +5998,7 @@ button {
     display: inline-block;
     padding: 3px 12px;
     background: var(--accent-bg-light);
-    color: var(--accent-primary);
+    color: var(--accent-secondary);
     border-radius: var(--radius-full);
     font-size: 0.85em;
     font-weight: 600;
