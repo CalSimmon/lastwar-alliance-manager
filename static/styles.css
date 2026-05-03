@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap');
 
 * {
     margin: 0;
@@ -35,7 +35,7 @@
     --header-stripe: rgba(255, 244, 230, 0.06);
     --header-glow: rgba(255, 184, 107, 0.18);
     --font-body: 'Barlow', 'Segoe UI', sans-serif;
-    --font-display: 'Rajdhani', 'Segoe UI', sans-serif;
+    --font-display: 'Barlow Condensed', 'Segoe UI', sans-serif;
     
     /* Rank Colors */
     --rank-r5-bg: linear-gradient(135deg, #ff6b35, #f7931e);
