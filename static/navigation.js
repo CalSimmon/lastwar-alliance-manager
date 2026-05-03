@@ -49,7 +49,7 @@
             <a href="/upload.html" class="nav-link">📸 Upload</a>
             <a href="/settings.html" class="nav-link">⚙️ Settings</a>
             <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
-            <a href="/archived.html" class="nav-link admin-link" id="archived-nav-link" style="display: none;">🗃️ Archived</a>
+            <a href="/graveyard.html" class="nav-link admin-link" id="graveyard-nav-link" style="display: none;">🪦 Graveyard</a>
         </nav>`;
 
         const footer = `
@@ -79,8 +79,8 @@
 
         const observer = new MutationObserver(() => {
             navAdminLink.style.display = dropdownAdminLink.style.display;
-            const archivedNavLink = document.getElementById('archived-nav-link');
-            if (archivedNavLink) archivedNavLink.style.display = dropdownAdminLink.style.display;
+            const graveyardNavLink = document.getElementById('graveyard-nav-link');
+            if (graveyardNavLink) graveyardNavLink.style.display = dropdownAdminLink.style.display;
         });
         observer.observe(dropdownAdminLink, { attributes: true, attributeFilter: ['style'] });
     }

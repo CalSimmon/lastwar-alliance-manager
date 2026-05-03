@@ -4,64 +4,86 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
-    <title>Archived Members - Last War Alliance Manager</title>
+    <title>The Graveyard - Last War Alliance Manager</title>
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
     <script src="navigation.js"></script>
 </head>
-<body data-h1="🗃️ Archived Members" data-subtitle="Soft-deleted members with full history">
+<body data-h1="🪦 The Graveyard" data-subtitle="Where the fallen rest... until you dig them back up">
     <div class="container">
 
         <main>
             <div class="card">
                 <div class="card-header">
-                    <h2>🗃️ Archived Members</h2>
-                    <span id="archive-count" class="badge"></span>
+                    <h2>🪦 The Graveyard</h2>
+                    <span id="grave-count" class="badge"></span>
                 </div>
 
+                <div id="graveyard-quote" style="
+                    margin: 0 0 16px 0;
+                    padding: 12px 16px;
+                    border-left: 3px solid var(--text-muted);
+                    color: var(--text-muted);
+                    font-style: italic;
+                    font-size: 0.9em;
+                "></div>
+
                 <div class="search-box">
-                    <input type="text" id="search-input" placeholder="🔍 Search by name..." oninput="filterTable()">
+                    <input type="text" id="search-input" placeholder="🔍 Search the tombstones..." oninput="filterTable()">
                 </div>
 
                 <div id="table-container">
-                    <div class="loading">Loading archived members...</div>
+                    <div class="loading">🕯️ Summoning the fallen...</div>
                 </div>
             </div>
         </main>
 
     </div>
 
-    <!-- Restore Confirmation Modal -->
+    <!-- Resurrect Confirmation Modal -->
     <div id="restore-modal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeRestoreModal()" role="button" tabindex="0" aria-label="Close dialog">&times;</span>
-            <h2>♻️ Restore Member</h2>
-            <p>Are you sure you want to restore <strong id="restore-member-name"></strong>?</p>
-            <p style="margin-top:8px; color: var(--text-muted); font-size: 0.9em;">Their account will be reactivated and they will appear as an active member. Future train schedules will NOT be automatically recreated.</p>
+            <h2>⚗️ Resurrect Member</h2>
+            <p>Disturb the eternal rest of <strong id="restore-member-name"></strong>?</p>
+            <p style="margin-top:8px; color: var(--text-muted); font-size: 0.9em;">They will be dragged back to the land of the living and appear on the active roster. Their train schedule, however, stays buried. You're on your own there.</p>
             <div class="modal-actions">
-                <button class="btn btn-sm btn-primary" onclick="confirmRestore()">♻️ Restore</button>
-                <button class="btn btn-sm btn-secondary" onclick="closeRestoreModal()">Cancel</button>
+                <button class="btn btn-sm btn-primary" onclick="confirmRestore()">⚗️ Rise from the Dead</button>
+                <button class="btn btn-sm btn-secondary" onclick="closeRestoreModal()">Leave them be</button>
             </div>
         </div>
     </div>
 
-    <!-- Permanent Delete Confirmation Modal -->
+    <!-- Obliterate Confirmation Modal -->
     <div id="delete-modal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeDeleteModal()" role="button" tabindex="0" aria-label="Close dialog">&times;</span>
-            <h2>🗑️ Permanently Delete Member</h2>
-            <p>Are you sure you want to <strong>permanently delete</strong> <strong id="delete-member-name"></strong>?</p>
-            <p style="margin-top:8px; color: var(--danger); font-size: 0.9em; font-weight:600;">⚠️ This cannot be undone. All train schedules, power records, awards, and recommendations for this member will be deleted forever.</p>
+            <h2>💀 Cast into the Void</h2>
+            <p>You are about to erase <strong id="delete-member-name"></strong> from existence entirely.</p>
+            <p style="margin-top:8px; color: var(--danger); font-size: 0.9em; font-weight:600;">⚠️ This goes beyond death. Train records, power history, awards, conduct reports — all of it turns to ash. The universe itself will forget them. This CANNOT be undone.</p>
             <div class="modal-actions">
-                <button class="btn btn-sm btn-danger" onclick="confirmPermanentDelete()">🗑️ Delete Forever</button>
-                <button class="btn btn-sm btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-sm btn-danger" onclick="confirmPermanentDelete()">💀 Obliterate</button>
+                <button class="btn btn-sm btn-secondary" onclick="closeDeleteModal()">Spare them</button>
             </div>
         </div>
     </div>
 
     <script src="theme.js"></script>
     <script>
+        const GRAVE_QUOTES = [
+            '"Death is just a promotion to Inactive status. Nobody asked for this promotion."',
+            '"They left us. We left them here. Seemed fair."',
+            '"Gone but not forgotten — well, there IS a permanent delete button, so..."',
+            '"May their train schedules be someone else\'s problem now."',
+            '"Every member is one bad week away from this page. Think about that."',
+            '"Some left voluntarily. Others were... encouraged. We don\'t judge. Much."',
+            '"Rest in peace. Your power score, however, was terrible."',
+            '"The graveyard grows. The alliance endures. One of these is more impressive than the other."',
+            '"To be removed is human. To be permanently deleted is administrative."',
+            '"Here lie the fallen. Their last act was disappointing their R5."',
+        ];
+
         let allMembers = [];
         let restoreMemberID = null;
         let deleteMemberID = null;
@@ -112,6 +134,11 @@
             });
         }
 
+        function showQuote() {
+            const el = document.getElementById('graveyard-quote');
+            if (el) el.textContent = GRAVE_QUOTES[Math.floor(Math.random() * GRAVE_QUOTES.length)];
+        }
+
         async function loadArchivedMembers() {
             try {
                 const resp = await fetch('/api/members/archived');
@@ -124,12 +151,14 @@
                 }
                 allMembers = await resp.json();
                 renderTable(allMembers);
-                const countEl = document.getElementById('archive-count');
-                countEl.textContent = allMembers.length + ' archived';
+                const countEl = document.getElementById('grave-count');
+                countEl.textContent = allMembers.length === 1
+                    ? '1 soul claimed'
+                    : `${allMembers.length} souls claimed`;
                 countEl.style.display = allMembers.length ? '' : 'none';
             } catch (err) {
                 document.getElementById('table-container').innerHTML =
-                    `<div class="empty-state">Failed to load archived members: ${err.message}</div>`;
+                    `<div class="empty-state">💀 The dead refuse to answer: ${err.message}</div>`;
             }
         }
 
@@ -156,7 +185,7 @@
         function renderTable(members) {
             const container = document.getElementById('table-container');
             if (!members.length) {
-                container.innerHTML = '<div class="empty-state">No archived members found.</div>';
+                container.innerHTML = '<div class="empty-state">🎃 The graveyard is empty. Everyone is still alive. Suspicious.</div>';
                 return;
             }
 
@@ -166,15 +195,15 @@
                     <td>${rankBadge(m.rank)}</td>
                     <td>${formatDate(m.deleted_at)}</td>
                     <td>${m.deleted_by ? escapeHtml(m.deleted_by) : '<span style="color:var(--text-muted)">—</span>'}</td>
-                    <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span style="color:var(--text-muted)">—</span>'}</td>
+                    <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span style="color:var(--text-muted)">No last words</span>'}</td>
                     <td style="text-align:center">${m.train_count}</td>
                     <td style="text-align:center">${m.award_count}</td>
                     <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
                         <button class="btn btn-sm btn-secondary" onclick="openRestoreModal(${m.id}, '${escapeHtml(m.name)}')">
-                            ♻️ Restore
+                            ⚗️ Resurrect
                         </button>
                         <button class="btn btn-sm btn-danger" onclick="openDeleteModal(${m.id}, '${escapeHtml(m.name)}')">
-                            🗑️ Delete
+                            💀 Obliterate
                         </button>
                     </td>
                 </tr>
@@ -186,9 +215,9 @@
                         <tr>
                             <th>Name</th>
                             <th>Rank</th>
-                            <th>Deleted On</th>
-                            <th>Deleted By</th>
-                            <th>Reason</th>
+                            <th>Killed On</th>
+                            <th>Executed By</th>
+                            <th>Last Words</th>
                             <th>Trains</th>
                             <th>Awards</th>
                             <th>Actions</th>
@@ -208,7 +237,7 @@
                 .replace(/'/g, '&#39;');
         }
 
-        // Restore modal
+        // Resurrect modal
         function openRestoreModal(id, name) {
             restoreMemberID = id;
             document.getElementById('restore-member-name').textContent = name;
@@ -225,11 +254,11 @@
             try {
                 const resp = await fetch(`/api/members/${restoreMemberID}/restore`, { method: 'POST' });
                 if (!resp.ok) {
-                    showToast((await resp.text()) || 'Failed to restore member', 'error');
+                    showToast((await resp.text()) || 'Resurrection failed', 'error');
                     return;
                 }
                 const data = await resp.json();
-                showToast(`${data.name} has been restored successfully`, 'success');
+                showToast(`${data.name} has risen from the grave 🧟`, 'success');
                 closeRestoreModal();
                 loadArchivedMembers();
             } catch (err) {
@@ -237,7 +266,7 @@
             }
         }
 
-        // Permanent delete modal
+        // Obliterate modal
         function openDeleteModal(id, name) {
             deleteMemberID = id;
             document.getElementById('delete-member-name').textContent = name;
@@ -254,10 +283,10 @@
             try {
                 const resp = await fetch(`/api/members/${deleteMemberID}/permanent`, { method: 'DELETE' });
                 if (!resp.ok) {
-                    showToast((await resp.text()) || 'Failed to delete member', 'error');
+                    showToast((await resp.text()) || 'Obliteration failed', 'error');
                     return;
                 }
-                showToast('Member permanently deleted', 'success');
+                showToast('They have been cast into the void. 💀', 'success');
                 closeDeleteModal();
                 loadArchivedMembers();
             } catch (err) {
@@ -276,6 +305,7 @@
         // navigation.js injects the header on DOMContentLoaded, so we must wait
         // for that to complete before attaching dropdown listeners / fetching auth.
         document.addEventListener('DOMContentLoaded', () => {
+            showQuote();
             setupDropdown();
             checkAuth().then(ok => { if (ok) loadArchivedMembers(); });
         });
