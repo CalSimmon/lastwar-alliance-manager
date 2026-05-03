@@ -5,6 +5,7 @@ let allMembers = [];
 let allLogins = [];
 let currentEditUserId = null;
 let currentResetUserId = null;
+let currentDeleteUserId = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -28,10 +29,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.addEventListener('click', (event) => {
         const dropdown = document.getElementById('user-dropdown-menu');
         const usernameBtn = document.getElementById('username-display');
-        
+
         if (dropdown && !usernameBtn?.contains(event.target) && !dropdown.contains(event.target)) {
             dropdown.classList.remove('show');
         }
+    });
+
+    // Close modals when clicking backdrop
+    document.getElementById('user-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeUserModal();
+    });
+    document.getElementById('reset-password-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeResetPasswordModal();
+    });
+    document.getElementById('delete-user-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeDeleteUserModal();
     });
 });
 
@@ -62,7 +74,7 @@ async function checkAdminAccess() {
         }
         
         if (!data.is_admin) {
-            alert('Access Denied: Admin privileges required');
+            showToast('Access Denied: Admin privileges required', 'error');
             window.location.href = 'index.html';
             return;
         }
@@ -235,7 +247,7 @@ function showCreateUserModal() {
     document.getElementById('user-id').value = '';
     document.getElementById('password-group').style.display = 'block';
     document.getElementById('password').required = true;
-    document.getElementById('user-modal').style.display = 'block';
+    document.getElementById('user-modal').style.display = 'flex';
 }
 
 // Edit User
@@ -251,7 +263,7 @@ function editUser(userId) {
     document.getElementById('is-admin').checked = user.is_admin;
     document.getElementById('password-group').style.display = 'none';
     document.getElementById('password').required = false;
-    document.getElementById('user-modal').style.display = 'block';
+    document.getElementById('user-modal').style.display = 'flex';
 }
 
 // Close User Modal
@@ -305,35 +317,44 @@ async function saveUser(event) {
         }
         
         const result = await response.json();
-        alert(result.message);
+        showToast(result.message, 'success');
         closeUserModal();
         loadUsers();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
-// Delete User
-async function deleteUser(userId, username) {
-    if (!confirm(`Are you sure you want to delete user "${username}"?\n\nThis action cannot be undone.`)) {
-        return;
-    }
-    
+// Delete User — shows confirmation modal
+function deleteUser(userId, username) {
+    currentDeleteUserId = userId;
+    document.getElementById('delete-user-name').textContent = username;
+    document.getElementById('delete-user-modal').style.display = 'flex';
+}
+
+function closeDeleteUserModal() {
+    document.getElementById('delete-user-modal').style.display = 'none';
+    currentDeleteUserId = null;
+}
+
+async function confirmDeleteUser() {
+    if (!currentDeleteUserId) return;
+    closeDeleteUserModal();
     try {
-        const response = await fetch(`/api/admin/users/${userId}`, {
+        const response = await fetch(`/api/admin/users/${currentDeleteUserId}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok) {
             const error = await response.text();
             throw new Error(error);
         }
-        
+
         const result = await response.json();
-        alert(result.message);
+        showToast(result.message, 'success');
         loadUsers();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -344,7 +365,7 @@ function showResetPasswordModal(userId, username) {
     document.getElementById('reset-password-info').style.display = 'block';
     document.getElementById('reset-password-result').style.display = 'none';
     document.getElementById('confirm-reset-btn').style.display = 'inline-block';
-    document.getElementById('reset-password-modal').style.display = 'block';
+    document.getElementById('reset-password-modal').style.display = 'flex';
 }
 
 // Close Reset Password Modal
@@ -376,7 +397,7 @@ async function confirmResetPassword() {
         
         loadUsers();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -384,7 +405,7 @@ async function confirmResetPassword() {
 function copyPassword() {
     const password = document.getElementById('result-password').textContent;
     navigator.clipboard.writeText(password).then(() => {
-        alert('Password copied to clipboard!');
+        showToast('Password copied to clipboard!', 'success');
     });
 }
 
