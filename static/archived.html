@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Archived Members - Last War Alliance Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="branding.js"></script>
+    <script src="toast.js"></script>
+    <script src="navigation.js"></script>
+</head>
+<body data-h1="🗃️ Archived Members" data-subtitle="Soft-deleted members with full history">
+    <div class="container">
+
+        <main>
+            <div class="card">
+                <div class="card-header">
+                    <h2>🗃️ Archived Members</h2>
+                    <span id="archive-count" class="badge"></span>
+                </div>
+
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="🔍 Search by name..." oninput="filterTable()">
+                </div>
+
+                <div id="table-container">
+                    <div class="loading">Loading archived members...</div>
+                </div>
+            </div>
+        </main>
+
+    </div>
+
+    <!-- Restore Confirmation Modal -->
+    <div id="restore-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>♻️ Restore Member</h3>
+                <button class="modal-close" onclick="closeRestoreModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to restore <strong id="restore-member-name"></strong>?</p>
+                <p class="text-muted">Their account will be reactivated and they will be visible again as an active member. Future train schedules will NOT be automatically recreated.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeRestoreModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmRestore()">♻️ Restore</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allMembers = [];
+        let restoreMemberID = null;
+
+        async function loadArchivedMembers() {
+            try {
+                const resp = await fetch('/api/members/archived');
+                if (!resp.ok) {
+                    if (resp.status === 401 || resp.status === 403) {
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error(await resp.text());
+                }
+                allMembers = await resp.json();
+                renderTable(allMembers);
+                document.getElementById('archive-count').textContent = allMembers.length + ' archived';
+            } catch (err) {
+                document.getElementById('table-container').innerHTML =
+                    `<div class="error">Failed to load archived members: ${err.message}</div>`;
+            }
+        }
+
+        function filterTable() {
+            const q = document.getElementById('search-input').value.toLowerCase();
+            renderTable(allMembers.filter(m => m.name.toLowerCase().includes(q)));
+        }
+
+        function formatDate(isoStr) {
+            if (!isoStr) return '—';
+            try {
+                return new Date(isoStr).toLocaleDateString(undefined, {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            } catch { return isoStr; }
+        }
+
+        function rankBadge(rank) {
+            const colours = { R5: '#e74c3c', R4: '#e67e22', R3: '#f1c40f', R2: '#2ecc71', R1: '#3498db' };
+            const bg = colours[rank] || '#888';
+            return `<span class="rank-badge" style="background:${bg}">${rank}</span>`;
+        }
+
+        function renderTable(members) {
+            const container = document.getElementById('table-container');
+            if (!members.length) {
+                container.innerHTML = '<div class="empty-state">No archived members found.</div>';
+                return;
+            }
+
+            let html = `
+                <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Rank</th>
+                            <th>Deleted On</th>
+                            <th>Deleted By</th>
+                            <th>Reason</th>
+                            <th>Trains</th>
+                            <th>Awards</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const m of members) {
+                html += `
+                    <tr>
+                        <td><strong>${escapeHtml(m.name)}</strong></td>
+                        <td>${rankBadge(m.rank)}</td>
+                        <td>${formatDate(m.deleted_at)}</td>
+                        <td>${m.deleted_by ? escapeHtml(m.deleted_by) : '<span class="text-muted">—</span>'}</td>
+                        <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span class="text-muted">—</span>'}</td>
+                        <td class="text-center">${m.train_count}</td>
+                        <td class="text-center">${m.award_count}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" onclick="openRestoreModal(${m.id}, '${escapeHtml(m.name)}')">
+                                ♻️ Restore
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function openRestoreModal(id, name) {
+            restoreMemberID = id;
+            document.getElementById('restore-member-name').textContent = name;
+            document.getElementById('restore-modal').style.display = 'flex';
+        }
+
+        function closeRestoreModal() {
+            restoreMemberID = null;
+            document.getElementById('restore-modal').style.display = 'none';
+        }
+
+        async function confirmRestore() {
+            if (!restoreMemberID) return;
+            try {
+                const resp = await fetch(`/api/members/${restoreMemberID}/restore`, { method: 'POST' });
+                if (!resp.ok) {
+                    const msg = await resp.text();
+                    showToast(msg || 'Failed to restore member', 'error');
+                    return;
+                }
+                const data = await resp.json();
+                showToast(`${data.name} has been restored successfully`, 'success');
+                closeRestoreModal();
+                loadArchivedMembers();
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('restore-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeRestoreModal();
+        });
+
+        loadArchivedMembers();
+    </script>
+</body>
+</html>

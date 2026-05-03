@@ -37,11 +37,14 @@ import (
 )
 
 type Member struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	Rank     string `json:"rank"`
-	Eligible bool   `json:"eligible"`
-	Power    *int64 `json:"power,omitempty"`
+	ID             int     `json:"id"`
+	Name           string  `json:"name"`
+	Rank           string  `json:"rank"`
+	Eligible       bool    `json:"eligible"`
+	Power          *int64  `json:"power,omitempty"`
+	DeletedAt      *string `json:"deleted_at,omitempty"`
+	DeletionReason *string `json:"deletion_reason,omitempty"`
+	DeletedBy      *string `json:"deleted_by,omitempty"`
 }
 
 type MemberStats struct {
@@ -1412,6 +1415,127 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 		log.Println("Default admin user created - Username: admin, Password: admin123")
 	}
 
+	// Migrate members table to add soft-delete columns
+	var deletedAtColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('members') WHERE name = 'deleted_at'`).Scan(&deletedAtColumnExists)
+	if err != nil {
+		return err
+	}
+	if !deletedAtColumnExists {
+		_, err = db.Exec(`ALTER TABLE members ADD COLUMN deleted_at TIMESTAMP`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`ALTER TABLE members ADD COLUMN deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`ALTER TABLE members ADD COLUMN deletion_reason TEXT`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added soft-delete columns to members table")
+	}
+
+	// Partial unique index: only active (non-deleted) members must have unique names
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_members_name_active ON members(name) WHERE deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate users table to add active column (for suspending accounts when member is deleted)
+	var userActiveColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('users') WHERE name = 'active'`).Scan(&userActiveColumnExists)
+	if err != nil {
+		return err
+	}
+	if !userActiveColumnExists {
+		_, err = db.Exec(`ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added active column to users table")
+	}
+
+	// Migrate train_schedules to add name snapshot columns (preserved even after member is deleted)
+	var conductorSnapshotExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('train_schedules') WHERE name = 'conductor_name_snapshot'`).Scan(&conductorSnapshotExists)
+	if err != nil {
+		return err
+	}
+	if !conductorSnapshotExists {
+		_, err = db.Exec(`ALTER TABLE train_schedules ADD COLUMN conductor_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`ALTER TABLE train_schedules ADD COLUMN backup_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		// Backfill snapshots from current member names
+		_, err = db.Exec(`UPDATE train_schedules SET
+			conductor_name_snapshot = (SELECT name FROM members WHERE id = conductor_id),
+			backup_name_snapshot = (SELECT name FROM members WHERE id = backup_id)`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added name snapshot columns to train_schedules table")
+	}
+
+	// Migrate awards to add member name snapshot column
+	var awardSnapshotExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('awards') WHERE name = 'member_name_snapshot'`).Scan(&awardSnapshotExists)
+	if err != nil {
+		return err
+	}
+	if !awardSnapshotExists {
+		_, err = db.Exec(`ALTER TABLE awards ADD COLUMN member_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`UPDATE awards SET member_name_snapshot = (SELECT name FROM members WHERE id = member_id)`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added member_name_snapshot column to awards table")
+	}
+
+	// Migrate recommendations to add member name snapshot column
+	var recSnapshotExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('recommendations') WHERE name = 'member_name_snapshot'`).Scan(&recSnapshotExists)
+	if err != nil {
+		return err
+	}
+	if !recSnapshotExists {
+		_, err = db.Exec(`ALTER TABLE recommendations ADD COLUMN member_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`UPDATE recommendations SET member_name_snapshot = (SELECT name FROM members WHERE id = member_id)`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added member_name_snapshot column to recommendations table")
+	}
+
+	// Migrate dyno_recommendations (conduct reports) to add member name snapshot column
+	var dynoSnapshotExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('dyno_recommendations') WHERE name = 'member_name_snapshot'`).Scan(&dynoSnapshotExists)
+	if err != nil {
+		return err
+	}
+	if !dynoSnapshotExists {
+		_, err = db.Exec(`ALTER TABLE dyno_recommendations ADD COLUMN member_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`UPDATE dyno_recommendations SET member_name_snapshot = (SELECT name FROM members WHERE id = member_id)`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added member_name_snapshot column to dyno_recommendations table")
+	}
+
 	return nil
 }
 
@@ -1441,7 +1565,7 @@ func rankManagementMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Check if member has R4 or R5 rank
 		if memberID, ok := session.Values["member_id"].(int); ok {
 			var rank string
-			err := db.QueryRow("SELECT rank FROM members WHERE id = ?", memberID).Scan(&rank)
+			err := db.QueryRow("SELECT rank FROM members WHERE id = ? AND deleted_at IS NULL", memberID).Scan(&rank)
 			if err == nil && (rank == "R4" || rank == "R5") {
 				next(w, r)
 				return
@@ -1466,7 +1590,7 @@ func adminR5Middleware(next http.HandlerFunc) http.HandlerFunc {
 		// Check if member has R5 rank
 		if memberID, ok := session.Values["member_id"].(int); ok {
 			var rank string
-			err := db.QueryRow("SELECT rank FROM members WHERE id = ?", memberID).Scan(&rank)
+			err := db.QueryRow("SELECT rank FROM members WHERE id = ? AND deleted_at IS NULL", memberID).Scan(&rank)
 			if err == nil && rank == "R5" {
 				next(w, r)
 				return
@@ -1522,6 +1646,14 @@ func login(w http.ResponseWriter, r *http.Request) {
 		// Track failed login attempt
 		trackLogin(user.ID, user.Username, r, false)
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if account is active (not suspended due to member deletion)
+	var isActive bool
+	if scanErr := db.QueryRow("SELECT COALESCE(active, 1) FROM users WHERE id = ?", user.ID).Scan(&isActive); scanErr == nil && !isActive {
+		trackLogin(user.ID, user.Username, r, false)
+		http.Error(w, "Account suspended", http.StatusForbidden)
 		return
 	}
 
@@ -1712,9 +1844,9 @@ func createUserForMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if member exists
+	// Check if member exists and is active
 	var memberName string
-	err = db.QueryRow("SELECT name FROM members WHERE id = ?", memberID).Scan(&memberName)
+	err = db.QueryRow("SELECT name FROM members WHERE id = ? AND deleted_at IS NULL", memberID).Scan(&memberName)
 	if err != nil {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
@@ -2164,6 +2296,7 @@ func getMembers(w http.ResponseWriter, r *http.Request) {
 		        ORDER BY ph.recorded_at DESC 
 		        LIMIT 1) as latest_power
 		FROM members m
+		WHERE m.deleted_at IS NULL
 		ORDER BY m.name
 	`
 	rows, err := db.Query(query)
@@ -2202,6 +2335,7 @@ func getMemberStats(w http.ResponseWriter, r *http.Request) {
 			COUNT(DISTINCT CASE WHEN ts.conductor_id = m.id AND ts.conductor_showed_up = 0 THEN ts.date END) as conductor_no_show_count
 		FROM members m
 		LEFT JOIN train_schedules ts ON ts.conductor_id = m.id OR ts.backup_id = m.id OR ts.actual_conductor_id = m.id
+		WHERE m.deleted_at IS NULL
 		GROUP BY m.id, m.name, m.rank
 		ORDER BY m.name
 	`)
@@ -2284,6 +2418,7 @@ func updateMember(w http.ResponseWriter, r *http.Request) {
 
 // Delete a member
 func deleteMember(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -2291,13 +2426,160 @@ func deleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.Exec("DELETE FROM members WHERE id = ?", id)
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	json.NewDecoder(r.Body).Decode(&input) // reason is optional
+
+	deleterUserID, _ := session.Values["user_id"].(int)
+	today := formatDateString(getServerTime())
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Soft-delete the member
+	var reasonVal interface{}
+	if input.Reason != "" {
+		reasonVal = input.Reason
+	}
+	result, err := tx.Exec(
+		"UPDATE members SET deleted_at = CURRENT_TIMESTAMP, deleted_by_id = ?, deletion_reason = ? WHERE id = ? AND deleted_at IS NULL",
+		deleterUserID, reasonVal, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		http.Error(w, "Member not found or already deleted", http.StatusNotFound)
+		return
+	}
+
+	// Expire all open recommendations for this member
+	tx.Exec("UPDATE recommendations SET expired = 1 WHERE member_id = ?", id)
+
+	// Remove from future conductor slots (can't have a schedule without a conductor)
+	tx.Exec("DELETE FROM train_schedules WHERE conductor_id = ? AND date >= ?", id, today)
+
+	// Clear from future backup slots (schedule can survive without a backup)
+	tx.Exec("UPDATE train_schedules SET backup_id = NULL, backup_name_snapshot = NULL WHERE backup_id = ? AND date >= ?", id, today)
+
+	// Suspend the linked user account (if any)
+	tx.Exec("UPDATE users SET active = 0 WHERE member_id = ?", id)
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to delete member", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Get archived (soft-deleted) members
+func getArchivedMembers(w http.ResponseWriter, r *http.Request) {
+	type ArchivedMember struct {
+		ID             int     `json:"id"`
+		Name           string  `json:"name"`
+		Rank           string  `json:"rank"`
+		DeletedAt      string  `json:"deleted_at"`
+		DeletionReason *string `json:"deletion_reason,omitempty"`
+		DeletedBy      *string `json:"deleted_by,omitempty"`
+		TrainCount     int     `json:"train_count"`
+		AwardCount     int     `json:"award_count"`
+	}
+
+	rows, err := db.Query(`
+		SELECT m.id, m.name, m.rank, m.deleted_at, m.deletion_reason,
+			u.username as deleted_by,
+			(SELECT COUNT(*) FROM train_schedules ts WHERE ts.conductor_id = m.id OR ts.actual_conductor_id = m.id) as train_count,
+			(SELECT COUNT(*) FROM awards a WHERE a.member_id = m.id) as award_count
+		FROM members m
+		LEFT JOIN users u ON m.deleted_by_id = u.id
+		WHERE m.deleted_at IS NOT NULL
+		ORDER BY m.deleted_at DESC
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var members []ArchivedMember
+	for rows.Next() {
+		var am ArchivedMember
+		if err := rows.Scan(&am.ID, &am.Name, &am.Rank, &am.DeletedAt, &am.DeletionReason, &am.DeletedBy, &am.TrainCount, &am.AwardCount); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		members = append(members, am)
+	}
+	if members == nil {
+		members = []ArchivedMember{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(members)
+}
+
+// Restore a soft-deleted member
+func restoreMember(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid member ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check the member exists and is deleted
+	var memberName string
+	err = db.QueryRow("SELECT name FROM members WHERE id = ? AND deleted_at IS NOT NULL", id).Scan(&memberName)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Archived member not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Check for name conflict with an active member
+	var conflictID int
+	err = db.QueryRow("SELECT id FROM members WHERE name = ? AND deleted_at IS NULL", memberName).Scan(&conflictID)
+	if err == nil {
+		http.Error(w, "An active member with this name already exists", http.StatusConflict)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Restore the member
+	_, err = tx.Exec("UPDATE members SET deleted_at = NULL, deleted_by_id = NULL, deletion_reason = NULL WHERE id = ?", id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	// Reactivate linked user account
+	tx.Exec("UPDATE users SET active = 1 WHERE member_id = ?", id)
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to restore member", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":   id,
+		"name": memberName,
+	})
 }
 
 // Get train schedules (optionally filtered by date range)
@@ -2307,13 +2589,18 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT 
-			ts.id, ts.date, ts.conductor_id, m1.name as conductor_name,
-			ts.conductor_score, ts.backup_id, m2.name as backup_name, m2.rank as backup_rank,
-			ts.conductor_showed_up, ts.actual_conductor_id, m3.name as actual_conductor_name,
+			ts.id, ts.date, ts.conductor_id,
+			COALESCE(m1.name, ts.conductor_name_snapshot, '[Removed Member]') as conductor_name,
+			ts.conductor_score,
+			ts.backup_id,
+			COALESCE(m2.name, ts.backup_name_snapshot, '') as backup_name,
+			COALESCE(m2.rank, '') as backup_rank,
+			ts.conductor_showed_up, ts.actual_conductor_id,
+			COALESCE(m3.name, '[Removed Member]') as actual_conductor_name,
 			ts.notes, ts.created_at
 		FROM train_schedules ts
-		JOIN members m1 ON ts.conductor_id = m1.id
-		JOIN members m2 ON ts.backup_id = m2.id
+		LEFT JOIN members m1 ON ts.conductor_id = m1.id AND m1.deleted_at IS NULL
+		LEFT JOIN members m2 ON ts.backup_id = m2.id AND m2.deleted_at IS NULL
 		LEFT JOIN members m3 ON ts.actual_conductor_id = m3.id
 	`
 
@@ -2396,10 +2683,16 @@ func createTrainSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch name snapshots (server-authoritative, not from client)
+	var conductorSnapshot string
+	db.QueryRow("SELECT name FROM members WHERE id = ?", ts.ConductorID).Scan(&conductorSnapshot)
+	var backupSnapshot string
+	db.QueryRow("SELECT name FROM members WHERE id = ?", ts.BackupID).Scan(&backupSnapshot)
+
 	// Use INSERT OR REPLACE to allow updating schedules created by auto-schedule
 	result, err := db.Exec(
-		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, actual_conductor_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes)
+		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, actual_conductor_id, notes, conductor_name_snapshot, backup_name_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, conductorSnapshot, backupSnapshot)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2453,9 +2746,17 @@ func updateTrainSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch name snapshots for the updated schedule
+	var updConductorSnapshot string
+	db.QueryRow("SELECT name FROM members WHERE id = ?", ts.ConductorID).Scan(&updConductorSnapshot)
+	var updBackupSnapshot string
+	if ts.BackupID > 0 {
+		db.QueryRow("SELECT name FROM members WHERE id = ?", ts.BackupID).Scan(&updBackupSnapshot)
+	}
+
 	_, err = db.Exec(
-		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, actual_conductor_id = ?, notes = ? WHERE id = ?",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, id)
+		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, actual_conductor_id = ?, notes = ?, conductor_name_snapshot = ?, backup_name_snapshot = ? WHERE id = ?",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, updConductorSnapshot, updBackupSnapshot, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2514,7 +2815,7 @@ func autoSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get all eligible members
-	rows, err := db.Query("SELECT id, name, rank, COALESCE(eligible, 1) FROM members WHERE COALESCE(eligible, 1) = 1 ORDER BY name")
+	rows, err := db.Query("SELECT id, name, rank, COALESCE(eligible, 1) FROM members WHERE COALESCE(eligible, 1) = 1 AND deleted_at IS NULL ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2604,11 +2905,22 @@ func autoSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var backupID int
+		var backupMemberName string
 		if len(availableBackups) > 0 {
 			// Randomly select from available backups
 			randomIndex := time.Now().UnixNano() % int64(len(availableBackups))
 			backupID = availableBackups[randomIndex].ID
+			backupMemberName = availableBackups[randomIndex].Name
 			usedBackups[backupID] = true
+		}
+
+		// Find conductor name for snapshot
+		var autoCondName string
+		for _, sc := range scoredCandidates {
+			if sc.Member.ID == conductorID {
+				autoCondName = sc.Member.Name
+				break
+			}
 		}
 
 		// If backupID is 0, no backup available - continue anyway and allow manual assignment
@@ -2617,13 +2929,13 @@ func autoSchedule(w http.ResponseWriter, r *http.Request) {
 		var result sql.Result
 		if backupID > 0 {
 			result, err = db.Exec(
-				"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score) VALUES (?, ?, ?, ?)",
-				dateStr, conductorID, backupID, conductorScore,
+				"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_name_snapshot, backup_name_snapshot) VALUES (?, ?, ?, ?, ?, ?)",
+				dateStr, conductorID, backupID, conductorScore, autoCondName, backupMemberName,
 			)
 		} else {
 			result, err = db.Exec(
-				"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score) VALUES (?, ?, NULL, ?)",
-				dateStr, conductorID, conductorScore,
+				"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_name_snapshot) VALUES (?, ?, NULL, ?, ?)",
+				dateStr, conductorID, conductorScore, autoCondName,
 			)
 		}
 		if err != nil {
@@ -2853,9 +3165,9 @@ func importCSV(w http.ResponseWriter, r *http.Request) {
 	detectedMembers := []DetectedMember{}
 	errors := []string{}
 
-	// Get existing members
+	// Get existing active members
 	existingMembers := make(map[string]Member)
-	rows, err := db.Query("SELECT id, name, rank FROM members")
+	rows, err := db.Query("SELECT id, name, rank FROM members WHERE deleted_at IS NULL")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -2958,18 +3270,20 @@ func getAwards(w http.ResponseWriter, r *http.Request) {
 
 	if weekDate != "" {
 		query = `
-			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id, m.name, a.created_at
+			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id,
+			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), a.created_at
 			FROM awards a
-			JOIN members m ON a.member_id = m.id
+			LEFT JOIN members m ON a.member_id = m.id AND m.deleted_at IS NULL
 			WHERE a.week_date = ?
 			ORDER BY a.award_type, a.rank
 		`
 		rows, err = db.Query(query, weekDate)
 	} else {
 		query = `
-			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id, m.name, a.created_at
+			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id,
+			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), a.created_at
 			FROM awards a
-			JOIN members m ON a.member_id = m.id
+			LEFT JOIN members m ON a.member_id = m.id AND m.deleted_at IS NULL
 			ORDER BY a.week_date DESC, a.award_type, a.rank
 		`
 		rows, err = db.Query(query)
@@ -3029,9 +3343,11 @@ func saveAwards(w http.ResponseWriter, r *http.Request) {
 	// Insert new awards
 	for _, award := range data.Awards {
 		if award.MemberID > 0 { // Only insert if a member is selected
+			var awardMemberName string
+			tx.QueryRow("SELECT name FROM members WHERE id = ?", award.MemberID).Scan(&awardMemberName)
 			_, err = tx.Exec(
-				"INSERT INTO awards (week_date, award_type, rank, member_id) VALUES (?, ?, ?, ?)",
-				data.WeekDate, award.AwardType, award.Rank, award.MemberID)
+				"INSERT INTO awards (week_date, award_type, rank, member_id, member_name_snapshot) VALUES (?, ?, ?, ?, ?)",
+				data.WeekDate, award.AwardType, award.Rank, award.MemberID, awardMemberName)
 			if err != nil {
 				tx.Rollback()
 				http.Error(w, "Failed to save award", http.StatusInternalServerError)
@@ -3077,21 +3393,21 @@ func getVSPoints(w http.ResponseWriter, r *http.Request) {
 		query = `
 			SELECT v.id, v.member_id, v.week_date, v.monday, v.tuesday, v.wednesday, 
 			       v.thursday, v.friday, v.saturday, v.created_at, v.updated_at,
-			       m.name, m.rank
+			       COALESCE(m.name, '[Inactive]'), COALESCE(m.rank, '')
 			FROM vs_points v
-			JOIN members m ON v.member_id = m.id
+			LEFT JOIN members m ON v.member_id = m.id AND m.deleted_at IS NULL
 			WHERE v.week_date = ?
-			ORDER BY m.name
+			ORDER BY COALESCE(m.name, '[Inactive]')
 		`
 		rows, err = db.Query(query, weekDate)
 	} else {
 		query = `
 			SELECT v.id, v.member_id, v.week_date, v.monday, v.tuesday, v.wednesday, 
 			       v.thursday, v.friday, v.saturday, v.created_at, v.updated_at,
-			       m.name, m.rank
+			       COALESCE(m.name, '[Inactive]'), COALESCE(m.rank, '')
 			FROM vs_points v
-			JOIN members m ON v.member_id = m.id
-			ORDER BY v.week_date DESC, m.name
+			LEFT JOIN members m ON v.member_id = m.id AND m.deleted_at IS NULL
+			ORDER BY v.week_date DESC, COALESCE(m.name, '[Inactive]')
 		`
 		rows, err = db.Query(query)
 	}
@@ -3360,8 +3676,8 @@ func getRecommendations(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			rec.id, 
 			rec.member_id, 
-			m.name, 
-			m.rank,
+			COALESCE(m.name, rec.member_name_snapshot, '[Removed Member]'),
+			COALESCE(m.rank, ''),
 			u.username,
 			rec.recommended_by_id,
 			COALESCE(rec.notes, ''),
@@ -3377,7 +3693,7 @@ func getRecommendations(w http.ResponseWriter, r *http.Request) {
 				ELSE 0
 			END as expired
 		FROM recommendations rec
-		JOIN members m ON rec.member_id = m.id
+		LEFT JOIN members m ON rec.member_id = m.id AND m.deleted_at IS NULL
 		JOIN users u ON rec.recommended_by_id = u.id
 		ORDER BY rec.created_at DESC
 	`)
@@ -3422,17 +3738,21 @@ func createRecommendation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if member exists
+	// Check if member exists and is active
 	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM members WHERE id = ?)", input.MemberID).Scan(&exists)
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM members WHERE id = ? AND deleted_at IS NULL)", input.MemberID).Scan(&exists)
 	if err != nil || !exists {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
+	// Get member name for snapshot
+	var recMemberName string
+	db.QueryRow("SELECT name FROM members WHERE id = ?", input.MemberID).Scan(&recMemberName)
+
 	result, err := db.Exec(
-		"INSERT INTO recommendations (member_id, recommended_by_id, notes) VALUES (?, ?, ?)",
-		input.MemberID, userID, input.Notes,
+		"INSERT INTO recommendations (member_id, recommended_by_id, notes, member_name_snapshot) VALUES (?, ?, ?, ?)",
+		input.MemberID, userID, input.Notes, recMemberName,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3464,7 +3784,7 @@ func createRecommendation(w http.ResponseWriter, r *http.Request) {
 				ELSE 0
 			END as expired
 		FROM recommendations rec
-		JOIN members m ON rec.member_id = m.id
+		LEFT JOIN members m ON rec.member_id = m.id AND m.deleted_at IS NULL
 		JOIN users u ON rec.recommended_by_id = u.id
 		WHERE rec.id = ?
 	`, id).Scan(&rec.ID, &rec.MemberID, &rec.MemberName, &rec.MemberRank,
@@ -3525,8 +3845,8 @@ func getConductReports(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			dr.id, 
 			dr.member_id, 
-			m.name, 
-			m.rank,
+			COALESCE(m.name, dr.member_name_snapshot, '[Removed Member]'),
+			COALESCE(m.rank, ''),
 			dr.points,
 			dr.notes,
 			u.username,
@@ -3537,7 +3857,7 @@ func getConductReports(w http.ResponseWriter, r *http.Request) {
 				ELSE 0
 			END as expired
 		FROM dyno_recommendations dr
-		JOIN members m ON dr.member_id = m.id
+		LEFT JOIN members m ON dr.member_id = m.id AND m.deleted_at IS NULL
 		JOIN users u ON dr.created_by_id = u.id
 		ORDER BY dr.created_at DESC
 	`)
@@ -3588,17 +3908,21 @@ func createConductReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if member exists
+	// Check if member exists and is active
 	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM members WHERE id = ?)", input.MemberID).Scan(&exists)
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM members WHERE id = ? AND deleted_at IS NULL)", input.MemberID).Scan(&exists)
 	if err != nil || !exists {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
+	// Get member name for snapshot
+	var conductMemberName string
+	db.QueryRow("SELECT name FROM members WHERE id = ?", input.MemberID).Scan(&conductMemberName)
+
 	result, err := db.Exec(
-		"INSERT INTO dyno_recommendations (member_id, points, notes, created_by_id) VALUES (?, ?, ?, ?)",
-		input.MemberID, input.Points, input.Notes, userID,
+		"INSERT INTO dyno_recommendations (member_id, points, notes, created_by_id, member_name_snapshot) VALUES (?, ?, ?, ?, ?)",
+		input.MemberID, input.Points, input.Notes, userID, conductMemberName,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3625,7 +3949,7 @@ func createConductReport(w http.ResponseWriter, r *http.Request) {
 				ELSE 0
 			END as expired
 		FROM dyno_recommendations dr
-		JOIN members m ON dr.member_id = m.id
+		LEFT JOIN members m ON dr.member_id = m.id AND m.deleted_at IS NULL
 		JOIN users u ON dr.created_by_id = u.id
 		WHERE dr.id = ?
 	`, id).Scan(&dr.ID, &dr.MemberID, &dr.MemberName, &dr.MemberRank,
@@ -3799,8 +4123,8 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all members
-	rows, err := db.Query("SELECT id, name, rank FROM members ORDER BY name")
+	// Get all active members
+	rows, err := db.Query("SELECT id, name, rank FROM members WHERE deleted_at IS NULL ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -4008,8 +4332,8 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 	now := getServerTime()
 	startDate := now.AddDate(0, -months, 0)
 
-	// Get all members
-	memberRows, err := db.Query("SELECT id, name, rank FROM members ORDER BY name")
+	// Get all active members
+	memberRows, err := db.Query("SELECT id, name, rank FROM members WHERE deleted_at IS NULL ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -4045,7 +4369,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 	var totalConductors, memberCount int
 	db.QueryRow(`
 		SELECT COUNT(DISTINCT conductor_id), 
-		       (SELECT COUNT(*) FROM members WHERE eligible = 1)
+		       (SELECT COUNT(*) FROM members WHERE eligible = 1 AND deleted_at IS NULL)
 		FROM train_schedules
 	`).Scan(&totalConductors, &memberCount)
 	avgConductorCount := 0.0
@@ -4409,10 +4733,12 @@ func generateWeeklyMessage(w http.ResponseWriter, r *http.Request) {
 	weekEnd := weekStart.AddDate(0, 0, 6)
 	rows, err := db.Query(`
 		SELECT 
-			ts.date, m1.name as conductor_name, m2.name as backup_name
+			ts.date,
+			COALESCE(m1.name, ts.conductor_name_snapshot, '[Removed]') as conductor_name,
+			COALESCE(m2.name, ts.backup_name_snapshot, '[Removed]') as backup_name
 		FROM train_schedules ts
-		JOIN members m1 ON ts.conductor_id = m1.id
-		JOIN members m2 ON ts.backup_id = m2.id
+		LEFT JOIN members m1 ON ts.conductor_id = m1.id AND m1.deleted_at IS NULL
+		LEFT JOIN members m2 ON ts.backup_id = m2.id AND m2.deleted_at IS NULL
 		WHERE ts.date >= ? AND ts.date <= ?
 		ORDER BY ts.date
 	`, formatDateString(weekStart), formatDateString(weekEnd))
@@ -4445,7 +4771,7 @@ func generateWeeklyMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get all eligible members and score them
-	memberRows, err := db.Query("SELECT id, name, rank FROM members WHERE eligible = 1 ORDER BY name")
+	memberRows, err := db.Query("SELECT id, name, rank FROM members WHERE eligible = 1 AND deleted_at IS NULL ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -4528,11 +4854,11 @@ func generateDailyMessage(w http.ResponseWriter, r *http.Request) {
 	var conductorName, conductorRank, backupName, backupRank string
 	err = db.QueryRow(`
 		SELECT 
-			m1.name as conductor_name, m1.rank as conductor_rank,
-			m2.name as backup_name, m2.rank as backup_rank
+			COALESCE(m1.name, ts.conductor_name_snapshot, '[Removed]'), COALESCE(m1.rank, ''),
+			COALESCE(m2.name, ts.backup_name_snapshot, '[Removed]'), COALESCE(m2.rank, '')
 		FROM train_schedules ts
-		JOIN members m1 ON ts.conductor_id = m1.id
-		JOIN members m2 ON ts.backup_id = m2.id
+		LEFT JOIN members m1 ON ts.conductor_id = m1.id AND m1.deleted_at IS NULL
+		LEFT JOIN members m2 ON ts.backup_id = m2.id AND m2.deleted_at IS NULL
 		WHERE ts.date = ?
 	`, formatDateString(date)).Scan(&conductorName, &conductorRank, &backupName, &backupRank)
 
@@ -4591,9 +4917,10 @@ func generateConductorMessages(w http.ResponseWriter, r *http.Request) {
 	weekEnd := weekStart.AddDate(0, 0, 6)
 	rows, err := db.Query(`
 		SELECT 
-			ts.date, m1.name as conductor_name
+			ts.date,
+			COALESCE(m1.name, ts.conductor_name_snapshot, '[Removed]') as conductor_name
 		FROM train_schedules ts
-		JOIN members m1 ON ts.conductor_id = m1.id
+		LEFT JOIN members m1 ON ts.conductor_id = m1.id AND m1.deleted_at IS NULL
 		WHERE ts.date >= ? AND ts.date <= ?
 		ORDER BY ts.date
 	`, formatDateString(weekStart), formatDateString(weekEnd))
@@ -4681,7 +5008,7 @@ func r4r5Middleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Get member rank
 		var rank string
-		err = db.QueryRow("SELECT rank FROM members WHERE id = ?", memberID).Scan(&rank)
+		err = db.QueryRow("SELECT rank FROM members WHERE id = ? AND deleted_at IS NULL", memberID).Scan(&rank)
 		if err != nil {
 			http.Error(w, "Member not found", http.StatusNotFound)
 			return
@@ -4840,7 +5167,7 @@ func confirmMemberUpdates(w http.ResponseWriter, r *http.Request) {
 		// Check if member exists
 		var existingID int
 		var existingRank string
-		err := db.QueryRow("SELECT id, rank FROM members WHERE name = ?", member.Name).Scan(&existingID, &existingRank)
+		err := db.QueryRow("SELECT id, rank FROM members WHERE name = ? AND deleted_at IS NULL", member.Name).Scan(&existingID, &existingRank)
 
 		if err == sql.ErrNoRows {
 			// Add new member
@@ -4865,17 +5192,27 @@ func confirmMemberUpdates(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remove specific members by ID if requested
+	// Remove specific members by ID if requested (soft delete)
 	if len(request.RemoveMemberIDs) > 0 {
+		today := formatDateString(getServerTime())
 		for _, id := range request.RemoveMemberIDs {
-			_, err := db.Exec("DELETE FROM members WHERE id = ?", id)
+			// Soft-delete the member
+			_, err := db.Exec("UPDATE members SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL", id)
 			if err != nil {
 				log.Printf("Error removing member with id %d: %v", id, err)
 				continue
 			}
+			// Expire open recommendations
+			db.Exec("UPDATE recommendations SET expired = 1 WHERE member_id = ?", id)
+			// Remove from future conductor schedules
+			db.Exec("DELETE FROM train_schedules WHERE conductor_id = ? AND date >= ?", id, today)
+			// Clear from future backup schedules
+			db.Exec("UPDATE train_schedules SET backup_id = NULL, backup_name_snapshot = NULL WHERE backup_id = ? AND date >= ?", id, today)
+			// Suspend linked user
+			db.Exec("UPDATE users SET active = 0 WHERE member_id = ?", id)
 			result.Removed++
 		}
-		log.Printf("Removed %d selected members", result.Removed)
+		log.Printf("Soft-deleted %d selected members", result.Removed)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -4943,9 +5280,9 @@ func addPowerRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if member exists
+	// Check if member exists and is active
 	var exists int
-	err := db.QueryRow("SELECT COUNT(*) FROM members WHERE id = ?", request.MemberID).Scan(&exists)
+	err := db.QueryRow("SELECT COUNT(*) FROM members WHERE id = ? AND deleted_at IS NULL", request.MemberID).Scan(&exists)
 	if err != nil || exists == 0 {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
@@ -6256,11 +6593,11 @@ func processVSPointsScreenshot(w http.ResponseWriter, r *http.Request) {
 		// Try to find member by exact name match first
 		var memberID int
 		var memberName string
-		err := tx.QueryRow("SELECT id, name FROM members WHERE LOWER(name) = LOWER(?)", record.MemberName).Scan(&memberID, &memberName)
+		err := tx.QueryRow("SELECT id, name FROM members WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL", record.MemberName).Scan(&memberID, &memberName)
 
 		if err == sql.ErrNoRows {
 			// Try fuzzy matching
-			rows, err := tx.Query("SELECT id, name FROM members")
+			rows, err := tx.Query("SELECT id, name FROM members WHERE deleted_at IS NULL")
 			if err != nil {
 				continue
 			}
@@ -6435,7 +6772,7 @@ func processPowerScreenshot(w http.ResponseWriter, r *http.Request) {
 		ID   int
 		Name string
 	}{}
-	rows, err := tx.Query("SELECT id, name FROM members")
+	rows, err := tx.Query("SELECT id, name FROM members WHERE deleted_at IS NULL")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -6452,11 +6789,11 @@ func processPowerScreenshot(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		// Try exact match first
 		var memberID int
-		err := tx.QueryRow("SELECT id FROM members WHERE name = ?", record.MemberName).Scan(&memberID)
+		err := tx.QueryRow("SELECT id FROM members WHERE name = ? AND deleted_at IS NULL", record.MemberName).Scan(&memberID)
 
 		if err != nil {
 			// Try case-insensitive match
-			err = tx.QueryRow("SELECT id FROM members WHERE LOWER(name) = LOWER(?)", record.MemberName).Scan(&memberID)
+			err = tx.QueryRow("SELECT id FROM members WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL", record.MemberName).Scan(&memberID)
 		}
 
 		if err != nil {
@@ -6544,7 +6881,9 @@ func main() {
 	// API routes (protected)
 	router.HandleFunc("/api/members", authMiddleware(getMembers)).Methods("GET")
 	router.HandleFunc("/api/members/stats", authMiddleware(getMemberStats)).Methods("GET")
+	router.HandleFunc("/api/members/archived", authMiddleware(getArchivedMembers)).Methods("GET")
 	router.HandleFunc("/api/members", authMiddleware(rankManagementMiddleware(createMember))).Methods("POST")
+	router.HandleFunc("/api/members/{id}/restore", authMiddleware(rankManagementMiddleware(restoreMember))).Methods("POST")
 	router.HandleFunc("/api/members/{id}", authMiddleware(rankManagementMiddleware(updateMember))).Methods("PUT")
 	router.HandleFunc("/api/members/{id}", authMiddleware(rankManagementMiddleware(deleteMember))).Methods("DELETE")
 	router.HandleFunc("/api/members/import", authMiddleware(rankManagementMiddleware(importCSV))).Methods("POST")
