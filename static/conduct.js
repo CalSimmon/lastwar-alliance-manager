@@ -514,7 +514,7 @@ function renderGroupedView(recs, container) {
             <div class="member-group-header">
                 <div class="member-info">
                     <span class="member-name">${group.member.name}</span>
-                    <span class="rank-badge rank-${group.member.rank.toLowerCase()}">${group.member.rank}</span>
+                    <span class="rank-badge rank-badge-${group.member.rank.toLowerCase()}">${group.member.rank}</span>
                     <span class="conduct-count">${activeRecs.length} active</span>
                 </div>
                 <div class="member-total-points ${totalPoints >= 0 ? 'positive' : 'negative'}">
@@ -556,7 +556,7 @@ function createConductCard(rec, compact = false) {
             ${!compact ? `
             <div class="member-info">
                 <span class="member-name">${rec.member_name}</span>
-                <span class="rank-badge rank-${rec.member_rank.toLowerCase()}">${rec.member_rank}</span>
+                <span class="rank-badge rank-badge-${rec.member_rank.toLowerCase()}">${rec.member_rank}</span>
             </div>
             ` : ''}
             <div class="rec-points ${pointsClass}">

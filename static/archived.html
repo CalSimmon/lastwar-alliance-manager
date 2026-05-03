@@ -89,9 +89,8 @@
         }
 
         function rankBadge(rank) {
-            const colours = { R5: '#e74c3c', R4: '#e67e22', R3: '#f1c40f', R2: '#2ecc71', R1: '#3498db' };
-            const bg = colours[rank] || '#888';
-            return `<span class="rank-badge" style="background:${bg}">${rank}</span>`;
+            const r = rank ? rank.toLowerCase() : '';
+            return `<span class="rank-badge rank-badge-${r}">${rank}</span>`;
         }
 
         function renderTable(members) {

@@ -1143,28 +1143,28 @@ button {
 }
 
 .rank-R5 {
-    background: var(--medal-gold);
-    color: var(--bs-warning-text);
+    background: var(--rank-r5-bg);
+    color: white;
 }
 
 .rank-R4 {
-    background: #ff6b6b;
+    background: var(--rank-r4-bg);
     color: white;
 }
 
 .rank-R3 {
-    background: #4ecdc4;
+    background: var(--rank-r3-bg);
     color: white;
 }
 
 .rank-R2 {
-    background: #95e1d3;
-    color: var(--bs-success-text);
+    background: var(--rank-r2-bg);
+    color: white;
 }
 
 .rank-R1 {
-    background: #a8dadc;
-    color: var(--info-dark);
+    background: var(--rank-r1-bg);
+    color: white;
 }
 
 .member-eligible {
@@ -1836,7 +1836,7 @@ button {
 }
 
 .remove-member-item:hover {
-    background: #fffaeb;
+    background: var(--bs-warning-bg);
     border-color: var(--color-orange-warning);
 }
 
@@ -2814,12 +2814,12 @@ button {
 
 .history-award-item.rank-1 {
     background: var(--medal-gold);
-    color: var(--bs-warning-text);
+    color: #2d1d00;
 }
 
 .history-award-item.rank-2 {
     background: var(--medal-silver);
-    color: var(--text-primary);
+    color: #2d2d2d;
 }
 
 .history-award-item.rank-3 {
