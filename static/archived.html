@@ -37,13 +37,25 @@
         <div class="modal-content">
             <span class="close" onclick="closeRestoreModal()" role="button" tabindex="0" aria-label="Close dialog">&times;</span>
             <h2>♻️ Restore Member</h2>
-
             <p>Are you sure you want to restore <strong id="restore-member-name"></strong>?</p>
             <p style="margin-top:8px; color: var(--text-muted); font-size: 0.9em;">Their account will be reactivated and they will appear as an active member. Future train schedules will NOT be automatically recreated.</p>
-
             <div class="modal-actions">
                 <button class="btn btn-sm btn-primary" onclick="confirmRestore()">♻️ Restore</button>
                 <button class="btn btn-sm btn-secondary" onclick="closeRestoreModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Permanent Delete Confirmation Modal -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDeleteModal()" role="button" tabindex="0" aria-label="Close dialog">&times;</span>
+            <h2>🗑️ Permanently Delete Member</h2>
+            <p>Are you sure you want to <strong>permanently delete</strong> <strong id="delete-member-name"></strong>?</p>
+            <p style="margin-top:8px; color: var(--danger); font-size: 0.9em; font-weight:600;">⚠️ This cannot be undone. All train schedules, power records, awards, and recommendations for this member will be deleted forever.</p>
+            <div class="modal-actions">
+                <button class="btn btn-sm btn-danger" onclick="confirmPermanentDelete()">🗑️ Delete Forever</button>
+                <button class="btn btn-sm btn-secondary" onclick="closeDeleteModal()">Cancel</button>
             </div>
         </div>
     </div>
@@ -52,6 +64,7 @@
     <script>
         let allMembers = [];
         let restoreMemberID = null;
+        let deleteMemberID = null;
 
         async function loadArchivedMembers() {
             try {
@@ -101,7 +114,7 @@
                 return;
             }
 
-            let rows = members.map(m => `
+            const rows = members.map(m => `
                 <tr>
                     <td><strong>${escapeHtml(m.name)}</strong></td>
                     <td>${rankBadge(m.rank)}</td>
@@ -110,9 +123,12 @@
                     <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span style="color:var(--text-muted)">—</span>'}</td>
                     <td style="text-align:center">${m.train_count}</td>
                     <td style="text-align:center">${m.award_count}</td>
-                    <td>
+                    <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
                         <button class="btn btn-sm btn-secondary" onclick="openRestoreModal(${m.id}, '${escapeHtml(m.name)}')">
                             ♻️ Restore
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="openDeleteModal(${m.id}, '${escapeHtml(m.name)}')">
+                            🗑️ Delete
                         </button>
                     </td>
                 </tr>
@@ -146,6 +162,7 @@
                 .replace(/'/g, '&#39;');
         }
 
+        // Restore modal
         function openRestoreModal(id, name) {
             restoreMemberID = id;
             document.getElementById('restore-member-name').textContent = name;
@@ -162,8 +179,7 @@
             try {
                 const resp = await fetch(`/api/members/${restoreMemberID}/restore`, { method: 'POST' });
                 if (!resp.ok) {
-                    const msg = await resp.text();
-                    showToast(msg || 'Failed to restore member', 'error');
+                    showToast((await resp.text()) || 'Failed to restore member', 'error');
                     return;
                 }
                 const data = await resp.json();
@@ -175,147 +191,40 @@
             }
         }
 
-        // Close modal when clicking outside
+        // Permanent delete modal
+        function openDeleteModal(id, name) {
+            deleteMemberID = id;
+            document.getElementById('delete-member-name').textContent = name;
+            document.getElementById('delete-modal').style.display = 'flex';
+        }
+
+        function closeDeleteModal() {
+            deleteMemberID = null;
+            document.getElementById('delete-modal').style.display = 'none';
+        }
+
+        async function confirmPermanentDelete() {
+            if (!deleteMemberID) return;
+            try {
+                const resp = await fetch(`/api/members/${deleteMemberID}/permanent`, { method: 'DELETE' });
+                if (!resp.ok) {
+                    showToast((await resp.text()) || 'Failed to delete member', 'error');
+                    return;
+                }
+                showToast('Member permanently deleted', 'success');
+                closeDeleteModal();
+                loadArchivedMembers();
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        // Close modals when clicking outside
         document.getElementById('restore-modal').addEventListener('click', function(e) {
             if (e.target === this) closeRestoreModal();
         });
-
-        loadArchivedMembers();
-    </script>
-</body>
-</html>
-
-        let allMembers = [];
-        let restoreMemberID = null;
-
-        async function loadArchivedMembers() {
-            try {
-                const resp = await fetch('/api/members/archived');
-                if (!resp.ok) {
-                    if (resp.status === 401 || resp.status === 403) {
-                        window.location.href = '/login.html';
-                        return;
-                    }
-                    throw new Error(await resp.text());
-                }
-                allMembers = await resp.json();
-                renderTable(allMembers);
-                document.getElementById('archive-count').textContent = allMembers.length + ' archived';
-            } catch (err) {
-                document.getElementById('table-container').innerHTML =
-                    `<div class="error">Failed to load archived members: ${err.message}</div>`;
-            }
-        }
-
-        function filterTable() {
-            const q = document.getElementById('search-input').value.toLowerCase();
-            renderTable(allMembers.filter(m => m.name.toLowerCase().includes(q)));
-        }
-
-        function formatDate(isoStr) {
-            if (!isoStr) return '—';
-            try {
-                return new Date(isoStr).toLocaleDateString(undefined, {
-                    year: 'numeric', month: 'short', day: 'numeric',
-                    hour: '2-digit', minute: '2-digit'
-                });
-            } catch { return isoStr; }
-        }
-
-        function rankBadge(rank) {
-            const r = rank ? rank.toLowerCase() : '';
-            return `<span class="rank-badge rank-badge-${r}">${rank}</span>`;
-        }
-
-        function renderTable(members) {
-            const container = document.getElementById('table-container');
-            if (!members.length) {
-                container.innerHTML = '<div class="empty-state">No archived members found.</div>';
-                return;
-            }
-
-            let html = `
-                <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Rank</th>
-                            <th>Deleted On</th>
-                            <th>Deleted By</th>
-                            <th>Reason</th>
-                            <th>Trains</th>
-                            <th>Awards</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-
-            for (const m of members) {
-                html += `
-                    <tr>
-                        <td><strong>${escapeHtml(m.name)}</strong></td>
-                        <td>${rankBadge(m.rank)}</td>
-                        <td>${formatDate(m.deleted_at)}</td>
-                        <td>${m.deleted_by ? escapeHtml(m.deleted_by) : '<span class="text-muted">—</span>'}</td>
-                        <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span class="text-muted">—</span>'}</td>
-                        <td class="text-center">${m.train_count}</td>
-                        <td class="text-center">${m.award_count}</td>
-                        <td>
-                            <button class="btn btn-sm btn-secondary" onclick="openRestoreModal(${m.id}, '${escapeHtml(m.name)}')">
-                                ♻️ Restore
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            }
-
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-        }
-
-        function escapeHtml(str) {
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
-        function openRestoreModal(id, name) {
-            restoreMemberID = id;
-            document.getElementById('restore-member-name').textContent = name;
-            document.getElementById('restore-modal').style.display = 'flex';
-        }
-
-        function closeRestoreModal() {
-            restoreMemberID = null;
-            document.getElementById('restore-modal').style.display = 'none';
-        }
-
-        async function confirmRestore() {
-            if (!restoreMemberID) return;
-            try {
-                const resp = await fetch(`/api/members/${restoreMemberID}/restore`, { method: 'POST' });
-                if (!resp.ok) {
-                    const msg = await resp.text();
-                    showToast(msg || 'Failed to restore member', 'error');
-                    return;
-                }
-                const data = await resp.json();
-                showToast(`${data.name} has been restored successfully`, 'success');
-                closeRestoreModal();
-                loadArchivedMembers();
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            }
-        }
-
-        // Close modal when clicking outside
-        document.getElementById('restore-modal').addEventListener('click', function(e) {
-            if (e.target === this) closeRestoreModal();
+        document.getElementById('delete-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeDeleteModal();
         });
 
         loadArchivedMembers();

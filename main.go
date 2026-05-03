@@ -2582,6 +2582,55 @@ func restoreMember(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Permanently delete a soft-deleted member and all their data
+func permanentlyDeleteMember(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid member ID", http.StatusBadRequest)
+		return
+	}
+
+	// Only allow deleting members that are already soft-deleted
+	var memberName string
+	err = db.QueryRow("SELECT name FROM members WHERE id = ? AND deleted_at IS NOT NULL", id).Scan(&memberName)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Archived member not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete all associated data before removing the member row
+	tx.Exec("DELETE FROM train_schedules WHERE conductor_id = ? OR backup_id = ? OR actual_conductor_id = ?", id, id, id)
+	tx.Exec("DELETE FROM power_records WHERE member_id = ?", id)
+	tx.Exec("DELETE FROM awards WHERE member_id = ?", id)
+	tx.Exec("DELETE FROM recommendations WHERE member_id = ?", id)
+	tx.Exec("DELETE FROM dyno_recommendations WHERE member_id = ?", id)
+	tx.Exec("DELETE FROM vs_points WHERE member_id = ?", id)
+	tx.Exec("DELETE FROM users WHERE member_id = ?", id)
+	_, err = tx.Exec("DELETE FROM members WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "Failed to delete member: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit deletion", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Get train schedules (optionally filtered by date range)
 func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 	startDate := r.URL.Query().Get("start")
@@ -6884,6 +6933,7 @@ func main() {
 	router.HandleFunc("/api/members/archived", authMiddleware(getArchivedMembers)).Methods("GET")
 	router.HandleFunc("/api/members", authMiddleware(rankManagementMiddleware(createMember))).Methods("POST")
 	router.HandleFunc("/api/members/{id}/restore", authMiddleware(rankManagementMiddleware(restoreMember))).Methods("POST")
+	router.HandleFunc("/api/members/{id}/permanent", authMiddleware(rankManagementMiddleware(permanentlyDeleteMember))).Methods("DELETE")
 	router.HandleFunc("/api/members/{id}", authMiddleware(rankManagementMiddleware(updateMember))).Methods("PUT")
 	router.HandleFunc("/api/members/{id}", authMiddleware(rankManagementMiddleware(deleteMember))).Methods("DELETE")
 	router.HandleFunc("/api/members/import", authMiddleware(rankManagementMiddleware(importCSV))).Methods("POST")

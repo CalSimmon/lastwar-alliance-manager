@@ -7022,12 +7022,12 @@ section:last-child {
 }
 
 .btn-secondary {
-    background: var(--text-muted);
-    color: white;
+    background: var(--border-color);
+    color: var(--text-primary);
 }
 
 .btn-secondary:hover {
-    background: var(--text-secondary);
+    background: var(--interactive-hover-bg);
 }
 
 /* Upload spinner (used via innerHTML in upload.js) */
