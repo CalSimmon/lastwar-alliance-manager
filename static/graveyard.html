@@ -23,8 +23,8 @@
                 <div id="graveyard-quote" style="
                     margin: 0 0 16px 0;
                     padding: 12px 16px;
-                    border-left: 3px solid var(--accent-primary);
-                    color: var(--text-secondary);
+                    border-left: 3px solid var(--text-muted);
+                    color: var(--text-muted);
                     font-style: italic;
                     font-size: 0.9em;
                 "></div>
@@ -47,7 +47,7 @@
             <span class="close" onclick="closeRestoreModal()" role="button" tabindex="0" aria-label="Close dialog">&times;</span>
             <h2>⚗️ Resurrect Member</h2>
             <p>Disturb the eternal rest of <strong id="restore-member-name"></strong>?</p>
-            <p style="margin-top:8px; color: var(--text-secondary); font-size: 0.9em;">They will be dragged back to the land of the living and appear on the active roster. Their train schedule, however, stays buried. You're on your own there.</p>
+            <p style="margin-top:8px; color: var(--text-muted); font-size: 0.9em;">They will be dragged back to the land of the living and appear on the active roster. Their train schedule, however, stays buried. You're on your own there.</p>
             <div class="modal-actions">
                 <button class="btn btn-sm btn-primary" onclick="confirmRestore()">⚗️ Rise from the Dead</button>
                 <button class="btn btn-sm btn-secondary" onclick="closeRestoreModal()">Leave them be</button>
@@ -194,8 +194,8 @@
                     <td><strong>${escapeHtml(m.name)}</strong></td>
                     <td>${rankBadge(m.rank)}</td>
                     <td>${formatDate(m.deleted_at)}</td>
-                    <td>${m.deleted_by ? escapeHtml(m.deleted_by) : '<span style="color:var(--text-secondary)">—</span>'}</td>
-                    <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span style="color:var(--text-secondary)">No last words</span>'}</td>
+                    <td>${m.deleted_by ? escapeHtml(m.deleted_by) : '<span style="color:var(--text-muted)">—</span>'}</td>
+                    <td>${m.deletion_reason ? escapeHtml(m.deletion_reason) : '<span style="color:var(--text-muted)">No last words</span>'}</td>
                     <td style="text-align:center">${m.train_count}</td>
                     <td style="text-align:center">${m.award_count}</td>
                     <td style="white-space:nowrap; display:flex; gap:6px; flex-wrap:wrap;">
