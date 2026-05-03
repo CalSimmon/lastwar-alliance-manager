@@ -5894,6 +5894,113 @@ button {
     }
 }
 
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+.text-center {
+    text-align: center;
+}
+
+/* Inline count badge */
+.badge {
+    display: inline-block;
+    padding: 3px 12px;
+    background: var(--accent-bg-light);
+    color: var(--accent-primary);
+    border-radius: var(--radius-full);
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+/* Button size modifier — overrides upload-page full-width defaults */
+.btn-sm {
+    padding: 6px 14px !important;
+    font-size: 0.85em !important;
+    width: auto !important;
+    margin: 0 !important;
+    display: inline-flex !important;
+}
+
+/* Button color variants */
+.btn-danger {
+    background: linear-gradient(135deg, var(--danger) 0%, var(--danger-dark) 100%);
+    color: white;
+}
+
+.btn-danger:hover {
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    transform: translateY(-2px);
+}
+
+.btn-warning {
+    background: linear-gradient(135deg, var(--warning) 0%, var(--warning-dark) 100%);
+    color: white;
+}
+
+.btn-warning:hover {
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+    transform: translateY(-2px);
+}
+
+/* Modal structural helpers */
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.3em;
+    font-weight: 700;
+}
+
+.modal-body {
+    padding: var(--space-xs) 0;
+    color: var(--text-primary);
+}
+
+.modal-body p {
+    margin-bottom: var(--space-xs);
+    line-height: 1.6;
+}
+
+.modal-footer,
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+    margin-top: var(--space-md);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+/* ✕ close button used inside .modal-header */
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.4em;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0 4px;
+    transition: color var(--transition-fast);
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
 /* Timezone tags styling */
 .timezone-tags {
     display: flex;
