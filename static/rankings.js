@@ -686,7 +686,7 @@ function displayRankings(rankings) {
 
     if (rankings.length === 0) {
         document.getElementById('rankings-list').innerHTML = 
-            '<p class="empty">No members match the current filters.</p>';
+            '<p class="empty">🧙 No survivors match these parameters. Try widening the search.</p>';
         return;
     }
 

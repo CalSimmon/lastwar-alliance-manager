@@ -166,7 +166,7 @@ async function loadMembers() {
     } catch (error) {
         console.error('Error loading members:', error);
         document.getElementById('members-list').innerHTML = 
-            '<p class="empty">Error loading members. Please try again.</p>';
+            '<p class="empty">🚨 Intel failure. Could not reach the survivors. Try again.</p>';
     }
 }
 
@@ -175,7 +175,7 @@ function displayMembers(members) {
     const membersList = document.getElementById('members-list');
     
     if (!members || members.length === 0) {
-        membersList.innerHTML = '<p class="empty">No members yet. Add your first alliance member!</p>';
+        membersList.innerHTML = '<p class="empty">🏜️ No survivors on the roster. The wasteland claims them all. Add one to begin.</p>';
         return;
     }
 

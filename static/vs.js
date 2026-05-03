@@ -201,7 +201,7 @@ function renderTable() {
     );
     
     if (filteredMembers.length === 0) {
-        html = '<tr><td colspan="8" style="text-align: center; padding: 20px;">No members found</td></tr>';
+        html = '<tr><td colspan="8" style="text-align: center; padding: 20px;">⚔️ No combatants found.</td></tr>';
     } else {
         filteredMembers.forEach(member => {
             const points = currentVSPoints[member.id] || {

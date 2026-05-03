@@ -381,7 +381,7 @@ async function loadSchedules() {
     } catch (error) {
         console.error('Error loading schedules:', error);
         document.getElementById('schedule-grid').innerHTML = 
-            '<p class="empty">Error loading schedules. Please try again.</p>';
+            '<p class="empty">⚠️ Supply route data corrupted. Retry the mission.</p>';
     }
 }
 
@@ -870,7 +870,7 @@ async function loadHistory() {
     } catch (error) {
         console.error('Error loading history:', error);
         document.getElementById('history-list').innerHTML = 
-            '<p class="empty">Error loading history.</p>';
+            '<p class="empty">📜 War logs unavailable.</p>';
     }
 }
 
