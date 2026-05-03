@@ -38,18 +38,24 @@
             </div>
         </header>
         <nav class="nav-menu">
-            <a href="/" class="nav-link">👥 Members</a>
-            <a href="/train.html" class="nav-link">🚂 Train</a>
-            <a href="/awards.html" class="nav-link">🏆 Awards</a>
-            <a href="/recommendations.html" class="nav-link">⭐ Recs</a>
-            <a href="/conduct.html" class="nav-link">📋 Conduct Reports</a>
-            <a href="/rankings.html" class="nav-link">📊 Rankings</a>
-            <a href="/storm.html" class="nav-link">🏜️ Storm</a>
-            <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
-            <a href="/upload.html" class="nav-link">📸 Upload</a>
-            <a href="/settings.html" class="nav-link">⚙️ Settings</a>
-            <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
-            <a href="/graveyard.html" class="nav-link admin-link" id="graveyard-nav-link" style="display: none;">🪦 Graveyard</a>
+            <div class="nav-header">
+                <span class="nav-logo">⚔️ Last War</span>
+                <button class="nav-collapse-btn" aria-label="Collapse sidebar" title="Collapse">‹</button>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">👥 Members</a>
+                <a href="/train.html" class="nav-link">🚂 Train</a>
+                <a href="/awards.html" class="nav-link">🏆 Awards</a>
+                <a href="/recommendations.html" class="nav-link">⭐ Recs</a>
+                <a href="/conduct.html" class="nav-link">📋 Conduct Reports</a>
+                <a href="/rankings.html" class="nav-link">📊 Rankings</a>
+                <a href="/storm.html" class="nav-link">🏜️ Storm</a>
+                <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
+                <a href="/upload.html" class="nav-link">📸 Upload</a>
+                <a href="/settings.html" class="nav-link">⚙️ Settings</a>
+                <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
+                <a href="/graveyard.html" class="nav-link admin-link" id="graveyard-nav-link" style="display: none;">🪦 Graveyard</a>
+            </div>
         </nav>`;
 
         const footer = `
@@ -118,57 +124,62 @@
     function initializeSidebarState() {
         const sidebar = document.querySelector('.nav-menu');
         const main = document.querySelector('main');
+        const header = document.querySelector('header');
+        const footer = document.querySelector('.app-footer');
         const savedState = localStorage.getItem('sidebarCollapsed');
-        
+
         if (!sidebar || !main) return;
 
-        // On mobile, default to collapsed
         const isMobile = window.innerWidth <= 768;
         const shouldCollapse = savedState === 'true' || (savedState === null && isMobile);
 
         if (shouldCollapse) {
             sidebar.classList.add('collapsed');
             main.classList.add('sidebar-collapsed');
+            if (header) header.classList.add('sidebar-collapsed');
+            if (footer) footer.classList.add('sidebar-collapsed');
         } else {
             sidebar.classList.remove('collapsed');
             main.classList.remove('sidebar-collapsed');
+            if (header) header.classList.remove('sidebar-collapsed');
+            if (footer) footer.classList.remove('sidebar-collapsed');
         }
 
         updateToggleIcon(shouldCollapse);
     }
 
-    // Update toggle button icon
+    // Show/hide external toggle button — only needed when sidebar is collapsed
     function updateToggleIcon(isCollapsed) {
         const toggleBtn = document.querySelector('.sidebar-toggle');
-        if (toggleBtn) {
-            toggleBtn.innerHTML = isCollapsed ? '☰' : '✕';
-        }
+        if (!toggleBtn) return;
+        toggleBtn.style.display = isCollapsed ? 'flex' : 'none';
     }
 
     // Toggle sidebar
     function toggleSidebar() {
         const sidebar = document.querySelector('.nav-menu');
         const main = document.querySelector('main');
-        const toggleBtn = document.querySelector('.sidebar-toggle');
+        const header = document.querySelector('header');
+        const footer = document.querySelector('.app-footer');
         const overlay = document.querySelector('.sidebar-overlay');
-        
+
         if (!sidebar || !main) return;
 
         const isCurrentlyCollapsed = sidebar.classList.contains('collapsed');
         const isMobile = window.innerWidth <= 768;
-        
+
         if (isCurrentlyCollapsed) {
             sidebar.classList.remove('collapsed');
             main.classList.remove('sidebar-collapsed');
-            if (isMobile && overlay) {
-                overlay.classList.add('active');
-            }
+            if (header) header.classList.remove('sidebar-collapsed');
+            if (footer) footer.classList.remove('sidebar-collapsed');
+            if (isMobile && overlay) overlay.classList.add('active');
         } else {
             sidebar.classList.add('collapsed');
             main.classList.add('sidebar-collapsed');
-            if (overlay) {
-                overlay.classList.remove('active');
-            }
+            if (header) header.classList.add('sidebar-collapsed');
+            if (footer) footer.classList.add('sidebar-collapsed');
+            if (overlay) overlay.classList.remove('active');
         }
 
         const newState = !isCurrentlyCollapsed;
@@ -242,8 +253,11 @@
         setActiveDropdownLink();
         mirrorAdminNavLink();
 
-        // Event listeners
+        // External toggle (shown only when collapsed) + collapse btn inside nav header
         toggleBtn.addEventListener('click', toggleSidebar);
+        const navCollapseBtn = document.querySelector('.nav-collapse-btn');
+        if (navCollapseBtn) navCollapseBtn.addEventListener('click', toggleSidebar);
+
         document.addEventListener('click', handleOutsideClick);
         window.addEventListener('resize', debounce(handleResize, 250));
 
