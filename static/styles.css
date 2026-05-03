@@ -399,12 +399,6 @@ button {
     overflow-x: hidden;
 }
 
-@media (prefers-color-scheme: dark) {
-    .container {
-        background: var(--container-bg);
-    }
-}
-
 header {
     background: var(--primary-gradient);
     color: white;
@@ -5380,12 +5374,6 @@ button {
     flex-wrap: wrap;
 }
 
-@media (prefers-color-scheme: dark) {
-    .tabs {
-        border-bottom-color: rgba(255, 255, 255, 0.1);
-    }
-}
-
 .tab-button {
     background: transparent;
     border: none;
@@ -5409,12 +5397,6 @@ button {
     border-bottom-color: var(--accent-primary);
     background: var(--accent-bg-active);
     font-weight: 700;
-}
-
-@media (prefers-color-scheme: dark) {
-    .tab-button.active {
-        color: #a0aef0;
-    }
 }
 
 .tab-content {
@@ -5444,17 +5426,7 @@ button {
     background: var(--card-bg);
     border-color: var(--accent-primary);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(167, 80, 24, 0.2);
-}
-
-@media (prefers-color-scheme: dark) {
-    .user-card {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    .user-card:hover {
-        background: rgba(255, 255, 255, 0.08);
-    }
+    box-shadow: var(--shadow-md);
 }
 
 .user-header {
@@ -5479,12 +5451,6 @@ button {
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-}
-
-@media (prefers-color-scheme: dark) {
-    .user-info h3 {
-        color: white;
-    }
 }
 
 .admin-badge {
@@ -5540,26 +5506,9 @@ button {
     font-size: 0.9em;
 }
 
-@media (prefers-color-scheme: dark) {
-    .stat {
-        background: rgba(0, 0, 0, 0.2);
-        border-color: rgba(255, 255, 255, 0.05);
-    }
-    
-    .stat-label {
-        color: rgba(255, 255, 255, 0.7);
-    }
-}
-
 .stat-value {
     color: var(--text-primary);
     font-weight: bold;
-}
-
-@media (prefers-color-scheme: dark) {
-    .stat-value {
-        color: white;
-    }
 }
 
 /* Recent Logins */
@@ -5573,16 +5522,6 @@ button {
     color: var(--text-primary);
     display: block;
     margin-bottom: 10px;
-}
-
-@media (prefers-color-scheme: dark) {
-    .recent-logins {
-        border-top-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    .recent-logins strong {
-        color: white;
-    }
 }
 
 .login-entry {
@@ -5610,25 +5549,6 @@ button {
     color: var(--text-secondary);
     font-size: 0.9em;
     opacity: 0.8;
-}
-
-@media (prefers-color-scheme: dark) {
-    .login-entry {
-        background: rgba(0, 0, 0, 0.2);
-        border-color: rgba(255, 255, 255, 0.05);
-    }
-    
-    .login-location {
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .login-ip {
-        color: rgba(255, 255, 255, 0.7);
-    }
-    
-    .login-time {
-        color: rgba(255, 255, 255, 0.6);
-    }
 }
 
 /* Login History Table */
@@ -5681,31 +5601,6 @@ button {
     border-bottom: none;
 }
 
-@media (prefers-color-scheme: dark) {
-    .login-table {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    .login-table thead {
-        background: rgba(0, 0, 0, 0.3);
-    }
-    
-    .login-table th {
-        color: white;
-        border-bottom-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    .login-table td {
-        color: rgba(255, 255, 255, 0.9);
-        border-bottom-color: rgba(255, 255, 255, 0.05);
-    }
-    
-    .login-row:hover {
-        background: rgba(255, 255, 255, 0.05);
-    }
-}
-
 .login-row.failed {
     background: rgba(229, 62, 62, 0.1);
 }
@@ -5726,7 +5621,7 @@ button {
 
 .device-info {
     font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
 }
 
 /* Filter Controls */
@@ -5739,9 +5634,9 @@ button {
 .filter-controls select {
     padding: 8px 12px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(0, 0, 0, 0.2);
-    color: white;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--text-primary);
     font-size: 14px;
 }
 
@@ -5765,18 +5660,6 @@ button {
     opacity: 0.7;
 }
 
-@media (prefers-color-scheme: dark) {
-    .search-box input {
-        border-color: rgba(255, 255, 255, 0.2);
-        background: rgba(0, 0, 0, 0.2);
-        color: white;
-    }
-    
-    .search-box input::placeholder {
-        color: rgba(255, 255, 255, 0.5);
-    }
-}
-
 /* Modal Overrides for Admin */
 #reset-password-result {
     padding: 20px;
@@ -5786,20 +5669,22 @@ button {
 }
 
 #result-password {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
     padding: 10px 15px;
     border-radius: 8px;
     display: inline-block;
     margin: 10px 0;
     font-family: 'Courier New', monospace;
     letter-spacing: 2px;
+    color: var(--text-primary);
 }
 
 .checkbox-group {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--accent-bg-subtle);
     padding: 15px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-color);
 }
 
 .checkbox-group label {
@@ -5832,16 +5717,6 @@ button {
     font-size: 1.1em;
 }
 
-@media (prefers-color-scheme: dark) {
-    .empty-state {
-        color: rgba(255, 255, 255, 0.6);
-    }
-    
-    .loading {
-        color: rgba(255, 255, 255, 0.7);
-    }
-}
-
 /* Error and Info Messages */
 .error-message {
     padding: 20px;
@@ -5861,13 +5736,21 @@ button {
     color: var(--text-primary);
 }
 
+html.theme-dark .error-message {
+    color: var(--danger);
+}
+
+html.theme-dark .info-message {
+    color: var(--info);
+}
+
 @media (prefers-color-scheme: dark) {
-    .error-message {
-        color: #fc8181;
+    html.theme-auto .error-message {
+        color: var(--danger);
     }
-    
-    .info-message {
-        color: #90cdf4;
+
+    html.theme-auto .info-message {
+        color: var(--info);
     }
 }
 
@@ -5963,22 +5846,6 @@ button {
     margin: 0;
     font-weight: 700;
     letter-spacing: -0.02em;
-}
-
-@media (prefers-color-scheme: dark) {
-    .card {
-        background: rgba(255, 255, 255, 0.02);
-        border-color: rgba(255, 255, 255, 0.1);
-        box-shadow: none;
-    }
-    
-    .card-header {
-        border-bottom-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    .card-header h2 {
-        color: white;
-    }
 }
 
 /* ========================================
