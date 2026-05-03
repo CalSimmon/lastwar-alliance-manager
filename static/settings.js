@@ -132,7 +132,7 @@ async function loadSettings() {
         togglePowerUploadSection(powerTrackingEnabled);
     } catch (error) {
         console.error('Error loading settings:', error);
-        alert('Failed to load settings');
+        showToast('Failed to load settings.', 'error');
     }
 }
 
@@ -141,7 +141,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     e.preventDefault();
     
     if (!isR5OrAdmin) {
-        alert('You do not have permission to modify settings. Only R5 members and admins can do this.');
+        showToast('You do not have permission to modify settings. Only R5 members and admins can do this.', 'error');
         return;
     }
     
@@ -176,16 +176,17 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
             throw new Error(error);
         }
         
-        alert('✅ Settings saved successfully!');
+        showToast('Settings saved successfully!', 'success');
     } catch (error) {
         console.error('Error saving settings:', error);
-        alert('❌ Failed to save settings: ' + error.message);
+        showToast('Failed to save settings: ' + error.message, 'error');
     }
 });
 
 // Reset to defaults
-document.getElementById('reset-btn').addEventListener('click', () => {
-    if (confirm('Reset all settings to default values?')) {
+document.getElementById('reset-btn').addEventListener('click', async () => {
+    const confirmed = await showConfirm('Reset all settings to default values?', 'Reset Settings', 'Reset', 'Cancel', true);
+    if (confirmed) {
         document.getElementById('alliance-name').value = 'Last War: Survival';
         document.getElementById('alliance-short-name').value = 'LWS';
         document.getElementById('award-first').value = 3;
@@ -251,12 +252,12 @@ document.getElementById('add-timezone-btn').addEventListener('click', () => {
     const timezone = select.value;
     
     if (!timezone) {
-        alert('Please select a timezone first');
+        showToast('Please select a timezone first.', 'warning');
         return;
     }
-    
+
     if (currentTimezones.includes(timezone)) {
-        alert('This timezone is already added');
+        showToast('This timezone is already added.', 'warning');
         return;
     }
     

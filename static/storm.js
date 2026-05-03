@@ -43,7 +43,7 @@ async function checkAuth() {
         
         // Check if user is R4, R5, or admin
         if (data.rank !== 'R4' && data.rank !== 'R5' && !data.is_admin) {
-            alert('Only R4, R5, and admin members can manage Desert Storm assignments.');
+            showToast('Only R4, R5, and admin members can manage Desert Storm assignments.', 'error');
             window.location.href = 'index.html';
             return false;
         }
@@ -103,16 +103,14 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout', 'Logout');
+    if (!confirmed) return;
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        showToast('Error logging out. Please try again.', 'error');
     }
 }
 
@@ -356,7 +354,7 @@ function generateMail() {
     });
     
     if (!hasAssignments) {
-        alert('No assignments found. Please assign members to buildings first.');
+        showToast('No assignments found. Please assign members to buildings first.', 'warning');
         return;
     }
     
@@ -473,54 +471,50 @@ async function copyMail() {
     
     try {
         await navigator.clipboard.writeText(mailText);
-        alert('✓ Mail copied to clipboard!');
+        showToast('Mail copied to clipboard!', 'success');
     } catch (error) {
-        // Fallback for older browsers
         const textArea = document.createElement('textarea');
         textArea.value = mailText;
         textArea.style.position = 'fixed';
         textArea.style.left = '-999999px';
         document.body.appendChild(textArea);
         textArea.select();
-        
+
         try {
             document.execCommand('copy');
-            alert('✓ Mail copied to clipboard!');
+            showToast('Mail copied to clipboard!', 'success');
         } catch (err) {
-            alert('Failed to copy mail. Please copy manually.');
+            showToast('Failed to copy mail. Please copy manually.', 'warning');
         }
-        
+
         document.body.removeChild(textArea);
     }
 }
 
 // Clear all assignments
 async function clearAssignments() {
-    if (!confirm(`Clear all assignments for Task Force ${currentTaskForce}? This cannot be undone.`)) {
-        return;
-    }
-    
+    const confirmed = await showConfirm(`Clear all assignments for Task Force ${currentTaskForce}? This cannot be undone.`, 'Clear Assignments', 'Clear', 'Cancel', true);
+    if (!confirmed) return;
     try {
         const response = await fetch(`${API_URL}/${currentTaskForce}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok && response.status !== 204) {
             throw new Error('Failed to clear assignments');
         }
-        
-        // Reset local assignments
+
         assignments = {};
         BUILDINGS.forEach(building => {
             assignments[building.id] = [];
         });
-        
+
         renderBuildings();
         document.getElementById('mail-output').style.display = 'none';
-        alert('✓ Assignments cleared!');
+        showToast('Assignments cleared!', 'success');
     } catch (error) {
         console.error('Error clearing assignments:', error);
-        alert('Failed to clear assignments: ' + error.message);
+        showToast('Failed to clear assignments: ' + error.message, 'error');
     }
 }
 

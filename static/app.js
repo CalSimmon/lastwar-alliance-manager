@@ -510,7 +510,7 @@ function setupCSVImport() {
                 membersToRemove = result.members_to_remove || [];
                 selectedRemoveMembers = new Set(); // Don't select any for removal by default
                 showCSVPreview(result);
-                modal.style.display = 'block';
+                modal.style.display = 'flex';
             } else {
                 displayImportError('No valid members found in CSV file');
             }
@@ -797,9 +797,8 @@ function displayImportError(message) {
 
 // Create user for member
 async function createUserForMember(memberId, memberName) {
-    if (!confirm(`Create a user account for ${memberName}? A random password will be generated.`)) {
-        return;
-    }
+    const confirmed = await showConfirm(`Create a user account for ${memberName}? A random password will be generated.`, 'Create User Account', 'Create');
+    if (!confirmed) return;
     
     try {
         const response = await fetch(`${API_URL}/${memberId}/create-user`, {

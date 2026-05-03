@@ -87,16 +87,14 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout', 'Logout');
+    if (!confirmed) return;
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        showToast('Error logging out. Please try again.', 'error');
     }
 }
 
@@ -109,7 +107,7 @@ async function loadMembers() {
         populateMemberSelect();
     } catch (error) {
         console.error('Error loading members:', error);
-        alert('Failed to load members.');
+        showToast('Failed to load members.', 'error');
     }
 }
 
@@ -168,7 +166,7 @@ async function loadConductReports() {
         renderConductReports();
     } catch (error) {
         console.error('Error loading conduct reports:', error);
-        alert('Failed to load conduct reports.');
+        showToast('Failed to load conduct reports.', 'error');
     }
 }
 
@@ -586,67 +584,66 @@ async function submitConductReport() {
     const notes = document.getElementById('notes-input').value.trim();
     
     if (!memberId) {
-        alert('Please select a member.');
+        showToast('Please select a member.', 'warning');
         return;
     }
-    
+
     if (isNaN(points)) {
-        alert('Please enter valid points.');
+        showToast('Please enter valid points.', 'warning');
         return;
     }
-    
+
     if (!notes) {
-        alert('Please provide notes for this recommendation.');
+        showToast('Please provide notes for this report.', 'warning');
         return;
     }
-    
+
+    const btn = document.getElementById('submit-conduct-btn');
+    setButtonLoading(btn, 'Submitting...');
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ member_id: memberId, points: points, notes: notes })
         });
-        
+
         if (!response.ok) {
             const error = await response.text();
             throw new Error(error);
         }
-        
-        // Clear form
+
         document.getElementById('member-select').value = '';
         document.getElementById('member-search').value = '';
         document.getElementById('points-input').value = '';
         document.getElementById('notes-input').value = '';
-        
-        // Reload recommendations
+
         await loadConductReports();
-        
-        alert('Conduct report submitted successfully!');
+        showToast('Conduct report submitted successfully!', 'success');
     } catch (error) {
         console.error('Error submitting conduct report:', error);
-        alert('Failed to submit conduct report: ' + error.message);
+        showToast('Failed to submit conduct report: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(btn);
     }
 }
 
 // Delete conduct report
 async function deleteConductReport(id) {
-    if (!confirm('Are you sure you want to delete this conduct report?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Are you sure you want to delete this conduct report?', 'Delete Report', 'Delete', 'Cancel', true);
+    if (!confirmed) return;
     try {
         const response = await fetch(`${API_URL}/${id}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to delete conduct report');
         }
-        
+
         await loadConductReports();
     } catch (error) {
         console.error('Error deleting conduct report:', error);
-        alert('Failed to delete conduct report.');
+        showToast('Failed to delete conduct report.', 'error');
     }
 }
 

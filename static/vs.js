@@ -79,16 +79,14 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout', 'Logout');
+    if (!confirmed) return;
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        showToast('Error logging out. Please try again.', 'error');
     }
 }
 
@@ -276,6 +274,8 @@ function updateTotal(memberId) {
 // Save VS points
 async function saveVSPoints() {
     const weekDate = formatDate(currentWeekDate);
+    const btn = document.getElementById('save-btn');
+    setButtonLoading(btn, 'Saving...');
     
     // Collect all points from the form
     const points = [];
@@ -304,37 +304,36 @@ async function saveVSPoints() {
             throw new Error('Failed to save VS points');
         }
         
-        alert('✓ VS points saved successfully!');
+        showToast('VS points saved successfully!', 'success');
         await loadVSPoints();
     } catch (error) {
         console.error('Error saving VS points:', error);
-        alert('Failed to save VS points: ' + error.message);
+        showToast('Failed to save VS points: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(btn);
     }
 }
 
 // Clear VS points
 async function clearVSPoints() {
     const weekDate = formatDate(currentWeekDate);
-    
-    if (!confirm('Clear all VS points for this week? This cannot be undone.')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Clear all VS points for this week? This cannot be undone.', 'Clear VS Points', 'Clear', 'Cancel', true);
+    if (!confirmed) return;
     try {
         const response = await fetch(`${API_URL}/${weekDate}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok && response.status !== 204) {
             throw new Error('Failed to clear VS points');
         }
-        
+
         currentVSPoints = {};
         renderTable();
-        alert('✓ VS points cleared for this week.');
+        showToast('VS points cleared for this week.', 'success');
     } catch (error) {
         console.error('Error clearing VS points:', error);
-        alert('Failed to clear VS points: ' + error.message);
+        showToast('Failed to clear VS points: ' + error.message, 'error');
     }
 }
 

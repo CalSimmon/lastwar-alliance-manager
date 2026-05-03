@@ -92,15 +92,17 @@ document.getElementById('password-form').addEventListener('submit', async (e) =>
     const confirmPassword = document.getElementById('confirm-password').value;
     
     if (newPassword !== confirmPassword) {
-        alert('❌ New passwords do not match!');
+        showToast('New passwords do not match!', 'warning');
         return;
     }
-    
+
     if (newPassword.length < 6) {
-        alert('❌ New password must be at least 6 characters!');
+        showToast('New password must be at least 6 characters!', 'warning');
         return;
     }
-    
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    setButtonLoading(btn, 'Saving...');
     try {
         const response = await fetch(`${API_BASE}/change-password`, {
             method: 'POST',
@@ -110,17 +112,19 @@ document.getElementById('password-form').addEventListener('submit', async (e) =>
                 new_password: newPassword
             })
         });
-        
+
         if (!response.ok) {
             const error = await response.text();
             throw new Error(error);
         }
-        
-        alert('✅ Password changed successfully!');
+
+        showToast('Password changed successfully!', 'success');
         document.getElementById('password-form').reset();
     } catch (error) {
         console.error('Error changing password:', error);
-        alert('❌ Failed to change password: ' + error.message);
+        showToast('Failed to change password: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(btn);
     }
 });
 

@@ -82,16 +82,14 @@ function toggleUserDropdown(event) {
 // Logout handler
 async function handleLogout(event) {
     event.preventDefault();
-    if (!confirm('Are you sure you want to logout?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout', 'Logout');
+    if (!confirmed) return;
     try {
         await fetch('/api/logout', { method: 'POST' });
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        alert('Error logging out. Please try again.');
+        showToast('Error logging out. Please try again.', 'error');
     }
 }
 
@@ -104,7 +102,7 @@ async function loadMembers() {
         populateMemberSelect();
     } catch (error) {
         console.error('Error loading members:', error);
-        alert('Failed to load members.');
+        showToast('Failed to load members.', 'error');
     }
 }
 
@@ -162,7 +160,7 @@ async function loadRecommendations() {
         renderRecommendations();
     } catch (error) {
         console.error('Error loading recommendations:', error);
-        alert('Failed to load recommendations.');
+        showToast('Failed to load recommendations.', 'error');
     }
 }
 
@@ -332,57 +330,56 @@ async function submitRecommendation() {
     const notes = notesInput.value.trim();
     
     if (!memberId) {
-        alert('Please select a member to recommend.');
+        showToast('Please select a member to recommend.', 'warning');
         return;
     }
-    
+
+    const btn = document.getElementById('submit-recommendation-btn');
+    setButtonLoading(btn, 'Submitting...');
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ member_id: memberId, notes })
         });
-        
+
         if (!response.ok) {
             throw new Error('Failed to submit recommendation');
         }
-        
-        // Clear form
+
         memberSelect.value = '';
         notesInput.value = '';
         document.getElementById('member-search').value = '';
-        
-        // Reload recommendations
+
         await loadRecommendations();
-        
-        alert('✓ Recommendation submitted successfully!');
+        showToast('Recommendation submitted successfully!', 'success');
     } catch (error) {
         console.error('Error submitting recommendation:', error);
-        alert('Failed to submit recommendation: ' + error.message);
+        showToast('Failed to submit recommendation: ' + error.message, 'error');
+    } finally {
+        clearButtonLoading(btn);
     }
 }
 
 // Delete recommendation
 async function deleteRecommendation(id) {
-    if (!confirm('Delete this recommendation?')) {
-        return;
-    }
-    
+    const confirmed = await showConfirm('Delete this recommendation?', 'Delete Recommendation', 'Delete', 'Cancel', true);
+    if (!confirmed) return;
     try {
         const response = await fetch(`${API_URL}/${id}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(errorText || 'Failed to delete recommendation');
         }
-        
+
         await loadRecommendations();
-        alert('✓ Recommendation deleted.');
+        showToast('Recommendation deleted.', 'success');
     } catch (error) {
         console.error('Error deleting recommendation:', error);
-        alert('Failed to delete recommendation: ' + error.message);
+        showToast('Failed to delete recommendation: ' + error.message, 'error');
     }
 }
 
