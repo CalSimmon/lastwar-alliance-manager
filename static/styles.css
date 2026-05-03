@@ -411,10 +411,9 @@ header {
     padding: 1.25rem 3rem;
     text-align: center;
     position: relative;
-    overflow: hidden;
-    isolation: isolate;
+    overflow: visible;
     box-shadow: var(--shadow-md);
-    z-index: 10;
+    z-index: 1200;
 }
 
 header::before {
@@ -457,6 +456,7 @@ header .user-info {
     display: flex;
     align-items: center;
     gap: 15px;
+    z-index: 1201;
 }
 
 /* User Dropdown */
@@ -504,7 +504,7 @@ header .user-info {
     visibility: hidden;
     transform: translateY(-10px);
     transition: all 0.3s ease;
-    z-index: 1000;
+    z-index: 1300;
     overflow: hidden;
 }
 
