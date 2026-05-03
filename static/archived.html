@@ -66,6 +66,52 @@
         let restoreMemberID = null;
         let deleteMemberID = null;
 
+        async function checkAuth() {
+            try {
+                const resp = await fetch('/api/check-auth');
+                const data = await resp.json();
+                if (!data.authenticated) {
+                    window.location.href = '/login.html';
+                    return false;
+                }
+                let displayText = `👤 ${data.username}`;
+                if (data.rank) displayText += ` (${data.rank})`;
+                const usernameBtn = document.getElementById('username-display');
+                if (usernameBtn) usernameBtn.textContent = displayText;
+                if (data.is_admin) {
+                    const adminLink = document.getElementById('admin-dropdown-link');
+                    if (adminLink) adminLink.style.display = 'block';
+                }
+                return true;
+            } catch (e) {
+                window.location.href = '/login.html';
+                return false;
+            }
+        }
+
+        function setupDropdown() {
+            const usernameBtn = document.getElementById('username-display');
+            const dropdown = document.getElementById('user-dropdown-menu');
+            const logoutBtn = document.getElementById('dropdown-logout-btn');
+            if (usernameBtn) {
+                usernameBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (dropdown) dropdown.classList.toggle('show');
+                });
+            }
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    if (!confirm('Are you sure you want to logout?')) return;
+                    await fetch('/api/logout', { method: 'POST' });
+                    window.location.href = '/login.html';
+                });
+            }
+            document.addEventListener('click', () => {
+                if (dropdown) dropdown.classList.remove('show');
+            });
+        }
+
         async function loadArchivedMembers() {
             try {
                 const resp = await fetch('/api/members/archived');
@@ -227,7 +273,8 @@
             if (e.target === this) closeDeleteModal();
         });
 
-        loadArchivedMembers();
+        setupDropdown();
+        checkAuth().then(ok => { if (ok) loadArchivedMembers(); });
     </script>
 </body>
 </html>
