@@ -339,9 +339,10 @@ function closeDeleteUserModal() {
 
 async function confirmDeleteUser() {
     if (!currentDeleteUserId) return;
+    const userId = currentDeleteUserId;
     closeDeleteUserModal();
     try {
-        const response = await fetch(`/api/admin/users/${currentDeleteUserId}`, {
+        const response = await fetch(`/api/admin/users/${userId}`, {
             method: 'DELETE'
         });
 
