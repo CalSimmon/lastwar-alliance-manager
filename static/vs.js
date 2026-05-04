@@ -1,364 +1,372 @@
-const API_URL = '/api/vs-points';
-const MEMBERS_URL = '/api/members';
+const API_BASE = '/api';
+
+const DAY_KEYS  = ['monday','tuesday','wednesday','thursday','friday','saturday'];
+const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat'];
+const DAY_THEMES = [
+    { emoji: '📡', name: 'Radar Training'    },
+    { emoji: '🏗️', name: 'Base Construction' },
+    { emoji: '🔬', name: 'Research'           },
+    { emoji: '🦸', name: 'Hero Upgrades'      },
+    { emoji: '⚔️', name: 'Troop Training'    },
+    { emoji: '💥', name: 'Enemy Buster'       },
+];
 
 let currentWeekDate = null;
-let allMembers = [];
-let currentVSPoints = {};
-let currentUsername = '';
+let allMembers      = [];
+let vsData          = {};      // { memberId: { monday, tuesday, ... } }
+let settings        = { vs_points_daily_target: 0, vs_points_weekly_target: 0 };
+let canEdit         = false;   // true for R4/R5/Admin
+let sortBy          = 'total';
 
-// Check authentication
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
 async function checkAuth() {
     try {
-        const response = await fetch('/api/check-auth');
-        const data = await response.json();
-        
-        if (!data.authenticated) {
-            window.location.href = '/login.html';
-            return false;
+        const res = await fetch(`${API_BASE}/check-auth`);
+        if (!res.ok) { window.location.href = '/login.html'; return false; }
+        const data = await res.json();
+        if (!data.authenticated) { window.location.href = '/login.html'; return false; }
+        document.getElementById('username-display').textContent = `👤 ${data.username}`;
+        if (data.is_admin) {
+            const al = document.getElementById('admin-dropdown-link');
+            if (al) al.style.display = 'block';
         }
-        
-        currentUsername = data.username;
-        let displayText = `👤 ${currentUsername}`;
-        if (data.rank) {
-            displayText += ` (${data.rank})`;
-        }
-        document.getElementById('username-display').textContent = displayText;
-        
-        return true;
-    } catch (error) {
-        console.error('Auth check error:', error);
+        canEdit = data.can_manage_ranks || data.is_admin;
+        return data;
+    } catch {
         window.location.href = '/login.html';
         return false;
     }
 }
 
-// Setup event listeners after auth check
-async function setupEventListeners() {
-    const usernameDisplay = document.getElementById('username-display');
-    const logoutBtn = document.getElementById('dropdown-logout-btn');
-    const adminLink = document.getElementById('admin-dropdown-link');
-    
-    if (usernameDisplay) {
-        usernameDisplay.addEventListener('click', toggleUserDropdown);
-    }
-    
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-    
-    // Check if user is admin to show admin link
-    try {
-        const response = await fetch('/api/check-auth');
-        const data = await response.json();
-        if (data.is_admin && adminLink) {
-            adminLink.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Error checking admin status:', error);
-    }
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (event) => {
-        const dropdown = document.getElementById('user-dropdown-menu');
-        const usernameBtn = document.getElementById('username-display');
-        if (dropdown && usernameBtn && !usernameBtn.contains(event.target) && !dropdown.contains(event.target)) {
-            dropdown.classList.remove('show');
-        }
+function setupEventListeners() {
+    const btn = document.getElementById('username-display');
+    const logout = document.getElementById('dropdown-logout-btn');
+    if (btn) btn.addEventListener('click', e => { e.stopPropagation(); document.getElementById('user-dropdown-menu')?.classList.toggle('show'); });
+    if (logout) logout.addEventListener('click', async e => {
+        e.preventDefault();
+        await fetch(`${API_BASE}/logout`, { method: 'POST' });
+        window.location.href = '/login.html';
+    });
+    document.addEventListener('click', e => {
+        const dd = document.getElementById('user-dropdown-menu');
+        const b  = document.getElementById('username-display');
+        if (dd && b && !b.contains(e.target) && !dd.contains(e.target)) dd.classList.remove('show');
     });
 }
 
-// Toggle user dropdown menu
-function toggleUserDropdown(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) {
-        dropdown.classList.toggle('show');
-    }
-}
+// ── Dates ─────────────────────────────────────────────────────────────────────
 
-// Logout handler
-async function handleLogout(event) {
-    event.preventDefault();
-    const confirmed = await showConfirm('Are you sure you want to logout?', 'Logout', 'Logout');
-    if (!confirmed) return;
-    try {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login.html';
-    } catch (error) {
-        console.error('Logout error:', error);
-        showToast('Error logging out. Please try again.', 'error');
-    }
-}
-
-// Get most recent Monday
-function getMostRecentMonday(date = new Date()) {
-    const d = new Date(date);
+function getMostRecentMonday(d = new Date()) {
     const day = d.getDay();
-    const diff = day === 0 ? 6 : day - 1; // If Sunday, go back 6 days, else go back to Monday
-    d.setDate(d.getDate() - diff);
-    return d;
+    const diff = day === 0 ? 6 : day - 1;
+    const m = new Date(d);
+    m.setDate(d.getDate() - diff);
+    m.setHours(0, 0, 0, 0);
+    return m;
 }
 
-// Format date as YYYY-MM-DD
-function formatDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function fmtDate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-// Format date for display (European style: dd/mm/yyyy)
-function formatDisplayDate(dateStr) {
-    const date = new Date(dateStr + 'T00:00:00');
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    
-    return `Week of ${day}/${month}/${year}`;
+function fmtDisplay(d) {
+    const saturday = new Date(d);
+    saturday.setDate(d.getDate() + 5);
+    return `${d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} – ${saturday.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`;
 }
 
-// Initialize current week
-function initializeWeek() {
-    currentWeekDate = getMostRecentMonday();
-    updateWeekDisplay();
+// ── Data ──────────────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/settings`);
+        if (res.ok) settings = await res.json();
+    } catch {}
 }
 
-// Update week display
-function updateWeekDisplay() {
-    document.getElementById('week-display').textContent = formatDisplayDate(formatDate(currentWeekDate));
-}
-
-// Navigate weeks functions
-function navigatePrevWeek() {
-    currentWeekDate.setDate(currentWeekDate.getDate() - 7);
-    updateWeekDisplay();
-    loadVSPoints();
-}
-
-function navigateNextWeek() {
-    currentWeekDate.setDate(currentWeekDate.getDate() + 7);
-    updateWeekDisplay();
-    loadVSPoints();
-}
-
-// Load members
 async function loadMembers() {
     try {
-        const response = await fetch(MEMBERS_URL);
-        allMembers = await response.json();
-        allMembers.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-    } catch (error) {
-        console.error('Error loading members:', error);
-    }
+        const res = await fetch(`${API_BASE}/members`);
+        allMembers = (await res.json()).sort((a,b) => a.name.localeCompare(b.name));
+    } catch {}
 }
 
-// Load VS points for current week
 async function loadVSPoints() {
-    const weekDate = formatDate(currentWeekDate);
-    
+    const week = fmtDate(currentWeekDate);
     try {
-        const response = await fetch(`${API_URL}?week=${weekDate}`);
-        const vsPoints = await response.json();
-        
-        // Organize VS points by member_id
-        currentVSPoints = {};
-        vsPoints.forEach(point => {
-            currentVSPoints[point.member_id] = point;
-        });
-        
-        renderTable();
-    } catch (error) {
-        console.error('Error loading VS points:', error);
-        renderTable();
+        const res = await fetch(`${API_BASE}/vs-points?week=${week}`);
+        const rows = res.ok ? await res.json() : [];
+        vsData = {};
+        (rows || []).forEach(r => { vsData[r.member_id] = r; });
+    } catch {}
+    render();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+function render() {
+    document.getElementById('week-label').textContent = fmtDisplay(currentWeekDate);
+    renderDayStrip();
+    renderSummaryBar();
+    renderTable();
+}
+
+function renderDayStrip() {
+    const dailyTarget = settings.vs_points_daily_target || 0;
+
+    // Compute alliance total per day
+    const dayTotals   = DAY_KEYS.map(k => Object.values(vsData).reduce((s, r) => s + (r[k] || 0), 0));
+    const dayParticip = DAY_KEYS.map(k => Object.values(vsData).filter(r => (r[k] || 0) > 0).length);
+    const memberCount = allMembers.length || 1;
+
+    // Is this the current week? If so, grey out future days
+    const today = new Date();
+    const todayMonday = getMostRecentMonday(today);
+    const isCurrentWeek = fmtDate(currentWeekDate) === fmtDate(todayMonday);
+    const todayDayIdx = (() => {
+        const d = today.getDay();
+        return d === 0 ? 6 : d - 1; // Mon=0 … Sun=6
+    })();
+
+    document.getElementById('day-strip').innerHTML = DAY_KEYS.map((key, i) => {
+        const isFuture = isCurrentWeek && i > todayDayIdx;
+        const total    = dayTotals[i];
+        const partPct  = Math.round(dayParticip[i] / memberCount * 100);
+        const metTarget = dailyTarget > 0 && total >= dailyTarget * memberCount;
+        let statusCls = isFuture ? 'vs2-day-future'
+                      : total === 0 ? 'vs2-day-empty'
+                      : metTarget ? 'vs2-day-ok'
+                      : 'vs2-day-partial';
+
+        return `
+            <div class="vs2-day-card ${statusCls}">
+                <div class="vs2-day-theme">${DAY_THEMES[i].emoji} ${DAY_THEMES[i].name}</div>
+                <div class="vs2-day-label">${DAY_LABELS[i]}</div>
+                <div class="vs2-day-total">${isFuture ? '—' : fmtK(total)}</div>
+                <div class="vs2-day-part">${isFuture ? '' : `${dayParticip[i]}/${memberCount} members`}</div>
+            </div>`;
+    }).join('');
+}
+
+function renderSummaryBar() {
+    const weeklyTarget = settings.vs_points_weekly_target || 0;
+    const membersWithData = Object.values(vsData).filter(r =>
+        DAY_KEYS.some(k => (r[k] || 0) > 0)
+    ).length;
+    const allianceTotal = Object.values(vsData).reduce((s, r) =>
+        s + DAY_KEYS.reduce((ds, k) => ds + (r[k] || 0), 0), 0);
+    const partPct = allMembers.length > 0 ? Math.round(membersWithData / allMembers.length * 100) : 0;
+
+    let targetHtml = '';
+    if (weeklyTarget > 0) {
+        const membersOnTarget = Object.entries(vsData).filter(([, r]) => {
+            const tot = DAY_KEYS.reduce((s,k) => s + (r[k]||0), 0);
+            return tot >= weeklyTarget;
+        }).length;
+        targetHtml = `<span class="vs2-sb-item">Weekly target met: <strong>${membersOnTarget}/${allMembers.length}</strong></span>`;
     }
+
+    document.getElementById('summary-bar').innerHTML = `
+        <span class="vs2-sb-item">Alliance total: <strong>${allianceTotal.toLocaleString()}</strong></span>
+        <span class="vs2-sb-sep">·</span>
+        <span class="vs2-sb-item">Participation: <strong>${partPct}%</strong> (${membersWithData}/${allMembers.length})</span>
+        ${weeklyTarget > 0 ? '<span class="vs2-sb-sep">·</span>' + targetHtml : ''}
+        ${canEdit ? '<span class="vs2-sb-edit-hint">Click any day cell to edit</span>' : ''}`;
 }
 
-// Calculate total for a member
-function calculateTotal(memberId) {
-    const points = currentVSPoints[memberId];
-    if (!points) return 0;
-    
-    return (points.monday || 0) + 
-           (points.tuesday || 0) + 
-           (points.wednesday || 0) + 
-           (points.thursday || 0) + 
-           (points.friday || 0) + 
-           (points.saturday || 0);
-}
-
-// Render table
 function renderTable() {
-    const tbody = document.getElementById('vs-tbody');
-    const searchTerm = document.getElementById('search-box').value.toLowerCase().trim();
-    
-    let html = '';
-    
-    // Filter members based on search
-    const filteredMembers = allMembers.filter(member => 
-        member.name.toLowerCase().includes(searchTerm)
-    );
-    
-    if (filteredMembers.length === 0) {
-        html = '<tr><td colspan="8" style="text-align: center; padding: 20px;">⚔️ No combatants found.</td></tr>';
-    } else {
-        filteredMembers.forEach(member => {
-            const points = currentVSPoints[member.id] || {
-                monday: 0,
-                tuesday: 0,
-                wednesday: 0,
-                thursday: 0,
-                friday: 0,
-                saturday: 0
-            };
-            
-            const total = calculateTotal(member.id);
-            
-            html += `
-                <tr data-member-id="${member.id}">
-                    <td>
-                        <span class="member-name">${escapeHtml(member.name)}</span>
-                        <span class="member-rank">(${escapeHtml(member.rank)})</span>
-                    </td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="monday" value="${points.monday}" min="0"></td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="tuesday" value="${points.tuesday}" min="0"></td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="wednesday" value="${points.wednesday}" min="0"></td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="thursday" value="${points.thursday}" min="0"></td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="friday" value="${points.friday}" min="0"></td>
-                    <td><input type="number" class="vs-input" data-member="${member.id}" data-day="saturday" value="${points.saturday}" min="0"></td>
-                    <td class="total-column">${total}</td>
-                </tr>
-            `;
-        });
+    const search  = document.getElementById('vs2-search').value.toLowerCase().trim();
+    const dailyT  = settings.vs_points_daily_target || 0;
+    const weeklyT = settings.vs_points_weekly_target || 0;
+
+    // Build header
+    document.getElementById('vs2-thead').innerHTML = `
+        <tr>
+            <th class="rk-col-pos">#</th>
+            <th class="rk-col-name">Member</th>
+            ${DAY_KEYS.map((k,i) => `<th class="vs2-col-day" title="${DAY_THEMES[i].name}">${DAY_THEMES[i].emoji} ${DAY_LABELS[i]}</th>`).join('')}
+            <th class="vs2-col-total">Total</th>
+        </tr>`;
+
+    // Filter
+    let members = allMembers.filter(m => !search || m.name.toLowerCase().includes(search));
+
+    // Sort
+    members = [...members].sort((a, b) => {
+        const ra = vsData[a.id], rb = vsData[b.id];
+        if (sortBy === 'name') return a.name.localeCompare(b.name);
+        if (sortBy === 'total') {
+            const ta = ra ? DAY_KEYS.reduce((s,k) => s+(ra[k]||0),0) : 0;
+            const tb = rb ? DAY_KEYS.reduce((s,k) => s+(rb[k]||0),0) : 0;
+            return tb - ta;
+        }
+        return (rb?.[sortBy]||0) - (ra?.[sortBy]||0);
+    });
+
+    const tbody = document.getElementById('vs2-tbody');
+    if (!members.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No members found.</td></tr>';
+        return;
     }
-    
-    tbody.innerHTML = html;
-    
-    // Add input event listeners to update totals
-    document.querySelectorAll('.vs-input').forEach(input => {
-        input.addEventListener('input', (e) => {
-            const memberId = parseInt(e.target.dataset.member);
-            updateTotal(memberId);
-            updateCurrentVSPoints(memberId, e.target.dataset.day, parseInt(e.target.value) || 0);
-        });
+
+    tbody.innerHTML = members.map((m, i) => {
+        const r = vsData[m.id];
+        const weekTotal = r ? DAY_KEYS.reduce((s,k) => s+(r[k]||0), 0) : 0;
+        const weekMet   = weeklyT > 0 && weekTotal >= weeklyT;
+        const totalCls  = !r || weekTotal === 0 ? 'vs2-zero'
+                        : weeklyT > 0 && weekMet ? 'vs2-cell-ok'
+                        : weeklyT > 0 ? 'vs2-cell-miss' : '';
+
+        const cells = DAY_KEYS.map(key => {
+            const val = r ? (r[key] || 0) : 0;
+            const cls = val === 0 ? 'vs2-zero'
+                      : dailyT > 0 && val >= dailyT ? 'vs2-cell-ok'
+                      : dailyT > 0 ? 'vs2-cell-miss' : '';
+
+            if (canEdit) {
+                return `<td class="vs2-col-day vs2-editable ${cls}"
+                            data-member-id="${m.id}" data-day="${key}" data-val="${val}"
+                            onclick="startEdit(this)">${val === 0 ? '—' : val.toLocaleString()}</td>`;
+            }
+            return `<td class="vs2-col-day ${cls}">${val === 0 ? '—' : val.toLocaleString()}</td>`;
+        }).join('');
+
+        return `
+            <tr class="${!r ? 'vs2-row-nodata' : ''}">
+                <td class="rk-col-pos">${i + 1}</td>
+                <td class="rk-col-name">
+                    <span class="rk-member-name">${escapeHtml(m.name)}</span>
+                    <span class="rank-badge rank-badge-${m.rank.toLowerCase()}">${m.rank}</span>
+                </td>
+                ${cells}
+                <td class="vs2-col-total ${totalCls}">${weekTotal === 0 ? '—' : weekTotal.toLocaleString()}</td>
+            </tr>`;
+    }).join('');
+}
+
+// ── Inline edit ───────────────────────────────────────────────────────────────
+
+function startEdit(cell) {
+    if (cell.querySelector('input')) return; // already editing
+    const memberId = parseInt(cell.dataset.memberId);
+    const day      = cell.dataset.day;
+    const current  = parseInt(cell.dataset.val) || 0;
+
+    cell.innerHTML = `
+        <div class="vs2-edit-wrap">
+            <input type="number" class="vs2-edit-input" value="${current}" min="0" autofocus>
+            <button class="vs2-edit-ok" title="Save">✓</button>
+            <button class="vs2-edit-cancel" title="Cancel">✗</button>
+        </div>`;
+
+    const input = cell.querySelector('input');
+    input.select();
+
+    const save = async () => {
+        const val = Math.max(0, parseInt(input.value) || 0);
+        await commitEdit(cell, memberId, day, val);
+    };
+
+    cell.querySelector('.vs2-edit-ok').addEventListener('click', save);
+    cell.querySelector('.vs2-edit-cancel').addEventListener('click', () => cancelEdit(cell, current));
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  save();
+        if (e.key === 'Escape') cancelEdit(cell, current);
+    });
+    input.addEventListener('blur', e => {
+        // Delay to let button clicks register first
+        setTimeout(() => { if (cell.querySelector('input')) cancelEdit(cell, current); }, 150);
     });
 }
 
-// Update current VS points in memory
-function updateCurrentVSPoints(memberId, day, value) {
-    if (!currentVSPoints[memberId]) {
-        currentVSPoints[memberId] = {
-            member_id: memberId,
-            monday: 0,
-            tuesday: 0,
-            wednesday: 0,
-            thursday: 0,
-            friday: 0,
-            saturday: 0
-        };
-    }
-    currentVSPoints[memberId][day] = value;
+function cancelEdit(cell, originalVal) {
+    cell.dataset.val = originalVal;
+    cell.textContent = originalVal === 0 ? '—' : originalVal.toLocaleString();
 }
 
-// Update total for a member
-function updateTotal(memberId) {
-    const row = document.querySelector(`tr[data-member-id="${memberId}"]`);
-    if (!row) return;
-    
-    const total = calculateTotal(memberId);
-    const totalCell = row.querySelector('.total-column');
-    if (totalCell) {
-        totalCell.textContent = total;
-    }
-}
-
-// Save VS points
-async function saveVSPoints() {
-    const weekDate = formatDate(currentWeekDate);
-    const btn = document.getElementById('save-btn');
-    setButtonLoading(btn, 'Saving...');
-    
-    // Collect all points from the form
-    const points = [];
-    allMembers.forEach(member => {
-        const vsPoint = currentVSPoints[member.id] || {};
-        
-        points.push({
-            member_id: member.id,
-            monday: parseInt(vsPoint.monday) || 0,
-            tuesday: parseInt(vsPoint.tuesday) || 0,
-            wednesday: parseInt(vsPoint.wednesday) || 0,
-            thursday: parseInt(vsPoint.thursday) || 0,
-            friday: parseInt(vsPoint.friday) || 0,
-            saturday: parseInt(vsPoint.saturday) || 0
-        });
-    });
-    
+async function commitEdit(cell, memberId, day, val) {
+    const week = fmtDate(currentWeekDate);
     try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
+        const res = await fetch(`${API_BASE}/vs-points/patch`, {
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ week_date: weekDate, points })
+            body: JSON.stringify({ week_date: week, member_id: memberId, day, value: val })
         });
-        
-        if (!response.ok) {
-            throw new Error('Failed to save VS points');
+        if (!res.ok) throw new Error(await res.text());
+
+        // Update local state
+        if (!vsData[memberId]) vsData[memberId] = { member_id: memberId };
+        vsData[memberId][day] = val;
+        cell.dataset.val = val;
+
+        // Re-apply colour class and display
+        const dailyT = settings.vs_points_daily_target || 0;
+        cell.className = cell.className.replace(/vs2-cell-ok|vs2-cell-miss|vs2-zero/g, '').trim();
+        if (val === 0) cell.classList.add('vs2-zero');
+        else if (dailyT > 0 && val >= dailyT) cell.classList.add('vs2-cell-ok');
+        else if (dailyT > 0) cell.classList.add('vs2-cell-miss');
+        cell.textContent = val === 0 ? '—' : val.toLocaleString();
+
+        // Refresh totals row and summary
+        renderDayStrip();
+        renderSummaryBar();
+        // Refresh total cell for this row
+        const row   = cell.closest('tr');
+        const allId = memberId;
+        const r     = vsData[allId];
+        const weekTotal = r ? DAY_KEYS.reduce((s,k) => s+(r[k]||0), 0) : 0;
+        const totalCell = row.querySelector('.vs2-col-total');
+        if (totalCell) {
+            const weeklyT = settings.vs_points_weekly_target || 0;
+            totalCell.textContent = weekTotal === 0 ? '—' : weekTotal.toLocaleString();
+            totalCell.className = 'vs2-col-total ' + (
+                weekTotal === 0 ? 'vs2-zero' :
+                weeklyT > 0 && weekTotal >= weeklyT ? 'vs2-cell-ok' :
+                weeklyT > 0 ? 'vs2-cell-miss' : '');
         }
-        
-        showToast('VS points saved successfully!', 'success');
-        await loadVSPoints();
-    } catch (error) {
-        console.error('Error saving VS points:', error);
-        showToast('Failed to save VS points: ' + error.message, 'error');
-    } finally {
-        clearButtonLoading(btn);
+    } catch(e) {
+        showToast('Failed to save: ' + e.message, 'error');
+        cancelEdit(cell, parseInt(cell.dataset.val) || 0);
     }
 }
 
-// Clear VS points
-async function clearVSPoints() {
-    const weekDate = formatDate(currentWeekDate);
-    const confirmed = await showConfirm('Clear all VS points for this week? This cannot be undone.', 'Clear VS Points', 'Clear', 'Cancel', true);
-    if (!confirmed) return;
-    try {
-        const response = await fetch(`${API_URL}/${weekDate}`, {
-            method: 'DELETE'
-        });
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-        if (!response.ok && response.status !== 204) {
-            throw new Error('Failed to clear VS points');
-        }
-
-        currentVSPoints = {};
-        renderTable();
-        showToast('VS points cleared for this week.', 'success');
-    } catch (error) {
-        console.error('Error clearing VS points:', error);
-        showToast('Failed to clear VS points: ' + error.message, 'error');
-    }
+function fmtK(v) {
+    if (v >= 1_000_000) return (v/1_000_000).toFixed(1) + 'M';
+    if (v >= 1_000)     return (v/1_000).toFixed(0) + 'K';
+    return v.toLocaleString();
 }
 
-// Escape HTML
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function escapeHtml(t) {
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
 }
 
-// Initialize
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', async () => {
-    const isAuthenticated = await checkAuth();
-    if (isAuthenticated) {
-        await setupEventListeners();
-        await loadMembers();
-        initializeWeek();
-        await loadVSPoints();
-        
-        // Set up event listeners
-        document.getElementById('prev-week').addEventListener('click', navigatePrevWeek);
-        document.getElementById('next-week').addEventListener('click', navigateNextWeek);
-        document.getElementById('save-btn').addEventListener('click', saveVSPoints);
-        document.getElementById('clear-btn').addEventListener('click', clearVSPoints);
-        document.getElementById('search-box').addEventListener('input', renderTable);
-    }
+    const auth = await checkAuth();
+    if (!auth) return;
+    setupEventListeners();
+
+    await Promise.all([loadSettings(), loadMembers()]);
+    currentWeekDate = getMostRecentMonday();
+    await loadVSPoints();
+
+    document.getElementById('prev-week').addEventListener('click', () => {
+        currentWeekDate.setDate(currentWeekDate.getDate() - 7);
+        loadVSPoints();
+    });
+    document.getElementById('next-week').addEventListener('click', () => {
+        currentWeekDate.setDate(currentWeekDate.getDate() + 7);
+        loadVSPoints();
+    });
+    document.getElementById('vs2-search').addEventListener('input', renderTable);
+    document.getElementById('vs2-sort').addEventListener('change', e => {
+        sortBy = e.target.value;
+        renderTable();
+    });
 });

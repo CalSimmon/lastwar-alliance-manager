@@ -1,58 +1,60 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Combat Points - Last War Alliance</title>
+    <title>VS Duel - Last War Alliance</title>
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
     <script src="navigation.js"></script>
 </head>
-<body data-h1="⚔️ Last War: Survival" data-subtitle="Track who actually shows up to fight. Shame optional.">
+<body data-h1="⚔️ Last War: Survival" data-subtitle="VS Duel — daily combat. No excuses.">
     <div class="container">
-
         <main>
-            <section class="vs-controls">
-                <div class="week-selector">
-                    <button id="prev-week" class="week-nav-btn">← Previous Week</button>
-                    <div class="week-info">
-                        <h3 id="week-display">Week of January 7, 2025</h3>
-                        <p class="week-subtitle">Monday - Saturday VS Points</p>
-                    </div>
-                    <button id="next-week" class="week-nav-btn">Next Week →</button>
+
+            <!-- ── Week nav ────────────────────────────────────── -->
+            <div class="vs2-week-nav">
+                <button class="btn btn-sm btn-secondary" id="prev-week">← Prev</button>
+                <div class="vs2-week-label" id="week-label">Loading...</div>
+                <button class="btn btn-sm btn-secondary" id="next-week">Next →</button>
+                <a href="/upload.html" class="btn btn-sm btn-secondary vs2-ocr-link" title="Upload screenshot via OCR">📸 OCR Upload</a>
+            </div>
+
+            <!-- ── Day cards strip ────────────────────────────── -->
+            <div class="vs2-day-strip" id="day-strip">
+                <div class="loading">⚔️ Loading...</div>
+            </div>
+
+            <!-- ── Alliance summary bar ───────────────────────── -->
+            <div class="vs2-summary-bar" id="summary-bar"></div>
+
+            <!-- ── Member table ───────────────────────────────── -->
+            <section class="vs2-table-section">
+                <div class="vs2-toolbar">
+                    <input type="text" id="vs2-search" class="rk-search-input" placeholder="🔍 Search members...">
+                    <select id="vs2-sort" class="rk-sort-select">
+                        <option value="total">Total ↓</option>
+                        <option value="monday">Mon ↓</option>
+                        <option value="tuesday">Tue ↓</option>
+                        <option value="wednesday">Wed ↓</option>
+                        <option value="thursday">Thu ↓</option>
+                        <option value="friday">Fri ↓</option>
+                        <option value="saturday">Sat ↓</option>
+                        <option value="name">Name A–Z</option>
+                    </select>
+                    <a href="/vs-compliance.html" class="btn btn-sm btn-secondary">📋 Compliance →</a>
                 </div>
-                <div class="action-buttons">
-                    <button id="save-btn" class="save-btn">💾 Save Points</button>
-                    <button id="clear-btn" class="clear-btn">🗑️ Clear Week</button>
+                <div class="rk-table-wrapper">
+                    <table class="rk-table vs2-table" id="vs2-table">
+                        <thead id="vs2-thead"></thead>
+                        <tbody id="vs2-tbody">
+                            <tr><td colspan="9" class="loading">⚔️ Rallying the troops...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
-            <section>
-                <input type="text" id="search-box" class="vs-search-box" placeholder="🔍 Search member...">
-            </section>
-
-            <section class="table-wrapper">
-                <table class="vs-table" id="vs-table">
-                    <thead>
-                        <tr>
-                            <th>Member</th>
-                            <th>Monday</th>
-                            <th>Tuesday</th>
-                            <th>Wednesday</th>
-                            <th>Thursday</th>
-                            <th>Friday</th>
-                            <th>Saturday</th>
-                            <th>Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="vs-tbody">
-                        <tr>
-                            <td colspan="8" style="text-align: center; padding: 20px;">⏳ Rallying the troops...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
         </main>
     </div>
 

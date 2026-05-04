@@ -3569,6 +3569,51 @@ func saveVSPoints(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "VS points saved successfully"})
 }
 
+// Patch a single member's VS points for one day (R4/R5/Admin only)
+func patchVSPoint(w http.ResponseWriter, r *http.Request) {
+	var data struct {
+		WeekDate string `json:"week_date"`
+		MemberID int    `json:"member_id"`
+		Day      string `json:"day"`
+		Value    int    `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if data.Value < 0 {
+		data.Value = 0
+	}
+
+	// Build safe upsert query using validated column name
+	var query string
+	switch data.Day {
+	case "monday":
+		query = `INSERT INTO vs_points (member_id, week_date, monday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET monday=?`
+	case "tuesday":
+		query = `INSERT INTO vs_points (member_id, week_date, tuesday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET tuesday=?`
+	case "wednesday":
+		query = `INSERT INTO vs_points (member_id, week_date, wednesday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET wednesday=?`
+	case "thursday":
+		query = `INSERT INTO vs_points (member_id, week_date, thursday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET thursday=?`
+	case "friday":
+		query = `INSERT INTO vs_points (member_id, week_date, friday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET friday=?`
+	case "saturday":
+		query = `INSERT INTO vs_points (member_id, week_date, saturday) VALUES (?,?,?) ON CONFLICT(member_id,week_date) DO UPDATE SET saturday=?`
+	default:
+		http.Error(w, "Invalid day — must be monday–saturday", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := db.Exec(query, data.MemberID, data.WeekDate, data.Value, data.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "updated"})
+}
+
 // Delete VS points for a specific week
 func deleteWeekVSPoints(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -7157,6 +7202,7 @@ func main() {
 	router.HandleFunc("/api/vs-points", authMiddleware(saveVSPoints)).Methods("POST")
 	router.HandleFunc("/api/vs-points/{week}", authMiddleware(deleteWeekVSPoints)).Methods("DELETE")
 	router.HandleFunc("/api/vs-points/process-screenshot", authMiddleware(processVSPointsScreenshot)).Methods("POST")
+	router.HandleFunc("/api/vs-points/patch", authMiddleware(r4r5Middleware(patchVSPoint))).Methods("PATCH")
 	router.HandleFunc("/api/vs-compliance", authMiddleware(getVSCompliance)).Methods("GET")
 
 	// Recommendations routes (protected)
