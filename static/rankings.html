@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14,78 +14,89 @@
 </head>
 <body data-h1="📊 Last War: Survival" data-subtitle="Who's pulling their weight. Others know who they are.">
     <div class="container">
-
         <main>
-            <section class="info-section">
-                <h3>� Current Priority System</h3>
-                <div id="system-info" class="system-info-card">
-                    <p>Loading command directives...</p>
+
+            <!-- ── Up Next ──────────────────────────────── -->
+            <section class="rk-up-next-section">
+                <div class="rk-up-next-header">
+                    <h3 class="rk-up-next-title">🚂 Up Next</h3>
+                    <div class="rk-up-next-meta">
+                        Avg runs: <strong id="avg-count">—</strong>
+                        <span class="rk-meta-sep">·</span>
+                        <button class="rk-formula-btn" onclick="openFormulaModal()">⚙️ Scoring Formula</button>
+                    </div>
+                </div>
+                <div id="up-next-list" class="rk-up-next-list">
+                    <div class="loading">⚔️ Calculating...</div>
                 </div>
             </section>
 
-            <section class="charts-section">
-                <h3>📊 Statistics & Analytics</h3>
-                <div class="charts-grid">
-                    <div class="chart-container">
-                        <h4>Score Distribution</h4>
-                        <canvas id="scoreChart"></canvas>
+            <!-- ── Rankings table ──────────────────────── -->
+            <section class="rk-section">
+                <div class="rk-toolbar">
+                    <input type="text" id="filter-name" class="rk-search-input" placeholder="🔍 Search members...">
+                    <div class="rk-rank-chips" id="rank-chips">
+                        <button class="filter-chip active" data-rank="">All</button>
+                        <button class="filter-chip" data-rank="R5">R5</button>
+                        <button class="filter-chip" data-rank="R4">R4</button>
+                        <button class="filter-chip" data-rank="R3">R3</button>
+                        <button class="filter-chip" data-rank="R2">R2</button>
+                        <button class="filter-chip" data-rank="R1">R1</button>
+                        <button class="filter-chip rk-first-timer-chip" data-rank="first-timer">🆕 First Timers</button>
                     </div>
-                    <div class="chart-container">
-                        <h4>Conductor Frequency</h4>
-                        <canvas id="conductorChart"></canvas>
+                    <div class="rk-actions">
+                        <select id="sort-by" class="rk-sort-select">
+                            <option value="total_score">Score ↓</option>
+                            <option value="conductor_count">Runs ↓</option>
+                            <option value="days_since">Days Since ↓</option>
+                            <option value="award_points">Awards ↓</option>
+                            <option value="recommendation_points">Recs ↓</option>
+                            <option value="name">Name A–Z</option>
+                        </select>
+                        <button id="refresh-btn" class="btn btn-sm btn-secondary" title="Refresh rankings">🔄</button>
+                        <button id="export-csv-btn" class="btn btn-sm btn-secondary" title="Export CSV">📥 CSV</button>
                     </div>
-                    <div class="chart-container">
-                        <h4>Points Breakdown (Top 10)</h4>
-                        <canvas id="pointsBreakdownChart"></canvas>
-                    </div>
+                </div>
+
+                <div class="rk-table-wrapper">
+                    <table class="rk-table">
+                        <thead>
+                            <tr>
+                                <th class="rk-col-pos">#</th>
+                                <th class="rk-col-name">Member</th>
+                                <th class="rk-col-score">Score</th>
+                                <th class="rk-col-runs">Runs</th>
+                                <th class="rk-col-since">Last Run</th>
+                                <th class="rk-col-awards">Awards</th>
+                                <th class="rk-col-recs">Recs</th>
+                                <th class="rk-col-expand"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="rankings-tbody">
+                            <tr><td colspan="8" class="loading">⚔️ Calculating survival scores...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
-            <section class="rankings-section">
-                <h3>🏅 Survivor Rankings</h3>
-                <div class="rankings-controls">
-                    <button id="refresh-btn" class="primary-btn">🔄 Refresh</button>
-                    <div class="info-badge">
-                        <strong>Average Conductor Count:</strong> <span id="avg-count">-</span>
-                    </div>
+            <!-- ── Analytics (collapsible) ─────────────── -->
+            <details class="rk-analytics">
+                <summary class="rk-analytics-summary">📊 Score Breakdown — Top 10</summary>
+                <div class="rk-analytics-body">
+                    <canvas id="pointsBreakdownChart" class="rk-analytics-canvas"></canvas>
                 </div>
-                
-                <div class="filter-controls">
-                    <div class="filter-group">
-                        <label for="filter-name">🔍 Filter by Name:</label>
-                        <input type="text" id="filter-name" placeholder="Enter member name...">
-                    </div>
-                    <div class="filter-group">
-                        <label for="filter-rank">🏅 Filter by Rank:</label>
-                        <select id="filter-rank">
-                            <option value="">All Ranks</option>
-                            <option value="R5">R5</option>
-                            <option value="R4">R4</option>
-                            <option value="R3">R3</option>
-                            <option value="R2">R2</option>
-                            <option value="R1">R1</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="sort-by">🔃 Sort by:</label>
-                        <select id="sort-by">
-                            <option value="total_score">Total Score</option>
-                            <option value="conductor_count">Conductor Count</option>
-                            <option value="days_since">Days Since Conductor</option>
-                            <option value="award_points">Award Points</option>
-                            <option value="recommendation_points">Recommendations</option>
-                            <option value="name">Name (A-Z)</option>
-                        </select>
-                    </div>
-                    <button id="clear-filters-btn" class="secondary-btn">✖️ Clear Filters</button>
-                    <button id="export-csv-btn" class="secondary-btn">📥 Export CSV</button>
-                </div>
-                
-                <div id="rankings-list" class="rankings-list">
-                    <p class="loading">⚔️ Calculating survival scores...</p>
-                </div>
-            </section>
+            </details>
+
         </main>
+    </div>
+
+    <!-- Formula Modal -->
+    <div id="formula-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeFormulaModal()" role="button" tabindex="0" aria-label="Close">&times;</span>
+            <h2>⚙️ Scoring Formula</h2>
+            <div id="formula-content"></div>
+        </div>
     </div>
 
     <script src="theme.js"></script>

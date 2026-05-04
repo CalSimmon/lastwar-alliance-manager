@@ -1,1037 +1,606 @@
 const API_BASE = '/api';
 const RANKINGS_URL = `${API_BASE}/rankings`;
 
-// Read CSS variable as a color string
 function getCSSColor(varName) {
     return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
 }
 
-// Apply theme-aware Chart.js defaults
 function applyChartTheme() {
-    const textColor = getCSSColor('--text-primary');
-    const borderColor = getCSSColor('--border-color');
-    Chart.defaults.color = textColor;
-    Chart.defaults.borderColor = borderColor;
+    Chart.defaults.color = getCSSColor('--text-primary');
+    Chart.defaults.borderColor = getCSSColor('--border-color');
 }
 
 let currentData = null;
 let filteredRankings = null;
-let previousRankings = null; // Track previous rankings for change indicators
+let maxScore = 1;
+let activeRankFilter = '';
+let breakdownChart = null;
 let memberTimelineCharts = [];
 let cachedTimelineData = null;
-let charts = {
-    score: null,
-    conductor: null,
-    pointsBreakdown: null
-};
 
-// Check authentication
+// Persist rank order across page loads for change indicators
+let previousRankingsMap = (function () {
+    try { return JSON.parse(localStorage.getItem('rankingsOrder') || 'null'); } catch { return null; }
+})();
+
+function saveRankingsOrder(rankings) {
+    try {
+        const map = {};
+        rankings.forEach((r, i) => { map[r.member.id] = i; });
+        localStorage.setItem('rankingsOrder', JSON.stringify(map));
+    } catch {}
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
 async function checkAuth() {
     try {
         const response = await fetch(`${API_BASE}/check-auth`);
-        if (!response.ok) {
-            window.location.href = '/login.html';
-            return false;
-        }
+        if (!response.ok) { window.location.href = '/login.html'; return false; }
         const data = await response.json();
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         return data;
-    } catch (error) {
-        console.error('Auth check failed:', error);
+    } catch {
         window.location.href = '/login.html';
         return false;
     }
 }
 
-// Setup event listeners after auth check
 function setupEventListeners(authData) {
     const usernameDisplay = document.getElementById('username-display');
     const logoutBtn = document.getElementById('dropdown-logout-btn');
     const adminLink = document.getElementById('admin-dropdown-link');
-    
-    if (usernameDisplay) {
-        usernameDisplay.addEventListener('click', toggleUserDropdown);
-    }
-    
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-    
-    // Use auth data passed from checkAuth to avoid duplicate request
-    if (authData.is_admin && adminLink) {
-        adminLink.style.display = 'block';
-    }
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (event) => {
+
+    if (usernameDisplay) usernameDisplay.addEventListener('click', toggleUserDropdown);
+    if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+    if (authData.is_admin && adminLink) adminLink.style.display = 'block';
+
+    document.addEventListener('click', (e) => {
         const dropdown = document.getElementById('user-dropdown-menu');
         const usernameBtn = document.getElementById('username-display');
-        if (dropdown && usernameBtn && !usernameBtn.contains(event.target) && !dropdown.contains(event.target)) {
+        if (dropdown && usernameBtn && !usernameBtn.contains(e.target) && !dropdown.contains(e.target)) {
             dropdown.classList.remove('show');
         }
     });
 }
 
-// Toggle user dropdown menu
 function toggleUserDropdown(event) {
     event.stopPropagation();
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) {
-        dropdown.classList.toggle('show');
-    }
+    document.getElementById('user-dropdown-menu')?.classList.toggle('show');
 }
 
-// Logout handler
 async function handleLogout(event) {
     event.preventDefault();
     try {
         await fetch(`${API_BASE}/logout`, { method: 'POST' });
         window.location.href = '/login.html';
-    } catch (error) {
-        console.error('Logout failed:', error);
-    }
+    } catch { console.error('Logout failed'); }
 }
 
-// Format date to dd/mm/yyyy
-function formatDate(dateStr) {
-    if (!dateStr) return '-';
-    const parts = dateStr.split('-');
-    return `${parts[2]}/${parts[1]}/${parts[0]}`;
-}
+// ── Data load ─────────────────────────────────────────────────────────────────
 
-// Load rankings
 async function loadRankings() {
+    const btn = document.getElementById('refresh-btn');
+    setButtonLoading(btn, '...');
     try {
         const response = await fetch(RANKINGS_URL);
         if (!response.ok) throw new Error('Failed to load rankings');
-        
         currentData = await response.json();
-        
-        // Invalidate cached timeline data on refresh
-        cachedTimelineData = null;
-        
-        // Build previous ranking map before updating
-        if (filteredRankings) {
-            previousRankings = {};
-            filteredRankings.forEach((r, i) => {
-                previousRankings[r.member.id] = i;
-            });
-        }
-        
+
+        maxScore = Math.max(...currentData.rankings.map(r => r.total_score), 1);
         filteredRankings = currentData.rankings;
-        
-        displaySystemInfo(currentData.settings, currentData.average_conductor_count);
-        displayCharts(currentData);
-        displayRankings(filteredRankings);
-        
-        document.getElementById('avg-count').textContent = 
-            currentData.average_conductor_count.toFixed(2);
+
+        document.getElementById('avg-count').textContent =
+            currentData.average_conductor_count.toFixed(1);
+
+        displayUpNext(currentData.rankings);
+        populateFormulaModal(currentData.settings, currentData.average_conductor_count);
+        applyFiltersAndSort();
+
+        // Save for next visit (after displaying, so change indicators already computed)
+        saveRankingsOrder(currentData.rankings);
+
     } catch (error) {
         console.error('Error loading rankings:', error);
-        document.getElementById('rankings-list').innerHTML = 
-            '<p class="error">Failed to load rankings. Please try again.</p>';
+        document.getElementById('rankings-tbody').innerHTML =
+            '<tr><td colspan="8" class="error-message">Failed to load rankings. Please try again.</td></tr>';
+    } finally {
+        clearButtonLoading(btn);
     }
 }
 
-// Display system info
-function displaySystemInfo(settings, avgCount) {
-    const html = `
-        <div class="system-info-grid">
-            <div class="system-info-item">
-                <span class="info-label">🥇 1st Place Award:</span>
-                <span class="info-value">+${settings.award_first_points} pts</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">🥈 2nd Place Award:</span>
-                <span class="info-value">+${settings.award_second_points} pts</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">🥉 3rd Place Award:</span>
-                <span class="info-value">+${settings.award_third_points} pts</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">⭐ Recommendations:</span>
-                <span class="info-value">5*√n pts (non-linear scaling)</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">🏅 R4/R5 Rank Boost:</span>
-                <span class="info-value">${settings.r4r5_rank_boost} × 2^(days/7) pts (exponential)</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">🎯 First Time Conductor Boost:</span>
-                <span class="info-value">+${settings.first_time_conductor_boost} pts (if never been conductor)</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">⏱️ Recent Conductor Penalty:</span>
-                <span class="info-value">-${settings.recent_conductor_penalty_days} pts max (based on days)</span>
-            </div>
-            <div class="system-info-item">
-                <span class="info-label">📊 Above Average Penalty:</span>
-                <span class="info-value">-${settings.above_average_conductor_penalty} pts</span>
-            </div>
-        </div>
-        <p class="system-note">
-            <strong>Note:</strong> Awards and recommendations stack across multiple weeks until you're assigned as conductor/backup, then they expire. 
-            Average conductor count: <strong>${avgCount.toFixed(2)}</strong> times.
-            <br><strong>Recommendation Formula:</strong> 5*√n points per day (1 rec = 5pts, 4 recs = 10pts, 9 recs = 15pts, 16 recs = 20pts)
-            <br><strong>R4/R5 Boost:</strong> Base × 2^(days/7) - doubles every week (Day 0: 1×, Day 7: 2×, Day 14: 4×, Day 21: 8×)
-        </p>
-    `;
-    document.getElementById('system-info').innerHTML = html;
+// ── Up Next ───────────────────────────────────────────────────────────────────
+
+function displayUpNext(rankings) {
+    const top = rankings.slice(0, 3);
+    const container = document.getElementById('up-next-list');
+
+    if (!top.length) {
+        container.innerHTML = '<div class="empty-state">No data available.</div>';
+        return;
+    }
+
+    const labels = ['1st Choice', '2nd Choice', '3rd Choice'];
+    container.innerHTML = top.map((r, i) => {
+        const isFirst = r.conductor_count === 0;
+        const sinceText = isFirst
+            ? '<span class="rk-never">🆕 Never</span>'
+            : r.days_since_last_conductor !== null
+                ? `${r.days_since_last_conductor}d ago`
+                : '—';
+
+        return `
+            <div class="rk-up-card rk-up-${i + 1}">
+                <div class="rk-up-label">${labels[i]}</div>
+                <div class="rk-up-name">
+                    ${escapeHtml(r.member.name)}
+                    <span class="rank-badge rank-badge-${r.member.rank.toLowerCase()}">${r.member.rank}</span>
+                    ${isFirst ? '<span class="first-timer-badge" title="Never been conductor">🆕</span>' : ''}
+                </div>
+                <div class="rk-up-score">${r.total_score} <span class="rk-up-pts">pts</span></div>
+                <div class="rk-up-since">${sinceText}</div>
+            </div>`;
+    }).join('');
 }
 
-// Display charts
-function displayCharts(data) {
-    const rankings = data.rankings;
-    
-    // Apply theme-aware defaults before rendering
+// ── Filters & Sort ────────────────────────────────────────────────────────────
+
+function applyFiltersAndSort() {
+    if (!currentData) return;
+    const nameFilter = document.getElementById('filter-name').value.toLowerCase().trim();
+    const sortBy = document.getElementById('sort-by').value;
+
+    filteredRankings = currentData.rankings.filter(r => {
+        const nameOk = !nameFilter || r.member.name.toLowerCase().includes(nameFilter);
+        const rankOk = !activeRankFilter
+            || (activeRankFilter === 'first-timer' ? r.conductor_count === 0 : r.member.rank === activeRankFilter);
+        return nameOk && rankOk;
+    });
+
+    filteredRankings.sort((a, b) => {
+        switch (sortBy) {
+            case 'total_score':          return b.total_score - a.total_score;
+            case 'conductor_count':      return b.conductor_count - a.conductor_count;
+            case 'days_since':           return (b.days_since_last_conductor ?? 9999) - (a.days_since_last_conductor ?? 9999);
+            case 'award_points':         return b.award_points - a.award_points;
+            case 'recommendation_points':return b.recommendation_points - a.recommendation_points;
+            case 'name':                 return a.member.name.localeCompare(b.member.name);
+            default: return 0;
+        }
+    });
+
+    displayRankings(filteredRankings);
+}
+
+function setActiveChip(rank) {
+    activeRankFilter = rank;
+    document.querySelectorAll('#rank-chips .filter-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.rank === rank);
+    });
+    applyFiltersAndSort();
+}
+
+// ── Rankings table ────────────────────────────────────────────────────────────
+
+function displayRankings(rankings) {
+    memberTimelineCharts.forEach(c => c.destroy());
+    memberTimelineCharts = [];
+    cachedTimelineData = null;
+
+    const tbody = document.getElementById('rankings-tbody');
+
+    if (!rankings.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">🧙 No survivors match these parameters.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rankings.map((r, i) => buildRowPair(r, i)).join('');
+
+    // Timeline option change → rebuild chart for that member
+    tbody.querySelectorAll('.timeline-opt').forEach(el => {
+        el.addEventListener('change', e => rebuildSingleMemberChart(parseInt(e.target.dataset.memberId)));
+    });
+
+    // Inactive awards toggle
+    tbody.querySelectorAll('.show-inactive-cb').forEach(cb => {
+        cb.addEventListener('change', e => toggleInactiveAwards(parseInt(e.target.dataset.memberId), e.target.checked));
+    });
+
+    // Re-render the analytics chart if the section is open
+    const details = document.querySelector('.rk-analytics');
+    if (details && details.open) displayBreakdownChart(currentData.rankings);
+}
+
+function buildRowPair(ranking, index) {
+    const medal = ['🥇','🥈','🥉'][index] || `#${index + 1}`;
+    const change = getRankChangeIndicator(ranking.member.id, index);
+    const isFirst = ranking.conductor_count === 0;
+    const barPct = ((ranking.total_score / maxScore) * 100).toFixed(1);
+    const lastRunHtml = formatLastRunCell(ranking.days_since_last_conductor);
+
+    const dataRow = `
+        <tr class="rk-row" data-member-id="${ranking.member.id}" onclick="toggleRow(${ranking.member.id})">
+            <td class="rk-col-pos">${medal}${change}</td>
+            <td class="rk-col-name">
+                <span class="rk-member-name">${escapeHtml(ranking.member.name)}</span>
+                <span class="rank-badge rank-badge-${ranking.member.rank.toLowerCase()}">${ranking.member.rank}</span>
+                ${isFirst ? '<span class="first-timer-badge" title="Never been conductor">🆕</span>' : ''}
+            </td>
+            <td class="rk-col-score">
+                <span class="rk-score-num">${ranking.total_score}</span>
+                <div class="rk-score-bar"><div class="rk-score-fill" style="width:${barPct}%"></div></div>
+            </td>
+            <td class="rk-col-runs">${ranking.conductor_count}</td>
+            <td class="rk-col-since">${lastRunHtml}</td>
+            <td class="rk-col-awards">${ranking.award_points > 0 ? '+' + ranking.award_points : '<span class="rk-zero">—</span>'}</td>
+            <td class="rk-col-recs">${ranking.recommendation_points > 0 ? '+' + ranking.recommendation_points : '<span class="rk-zero">—</span>'}</td>
+            <td class="rk-col-expand"><span class="rk-expand-icon">▶</span></td>
+        </tr>`;
+
+    const detailRow = `
+        <tr class="rk-detail-row" id="detail-row-${ranking.member.id}">
+            <td colspan="8"><div class="rk-detail-inner">${buildDetailContent(ranking)}</div></td>
+        </tr>`;
+
+    return dataRow + detailRow;
+}
+
+function buildDetailContent(r) {
+    // Score breakdown bars
+    const total = r.total_score || 1;
+    const bItems = [
+        { label: '🏆 Awards',         val: r.award_points,               cls: 'positive', color: 'gold'   },
+        { label: '⭐ Recs',            val: r.recommendation_points,       cls: 'positive', color: 'teal'   },
+        { label: '🏅 Rank Boost',      val: r.rank_boost,                  cls: 'positive', color: 'purple' },
+        { label: '🎯 First Timer',     val: r.first_time_conductor_boost,  cls: 'positive', color: 'blue'   },
+        { label: '⏱️ Recent Penalty', val: -r.recent_conductor_penalty,   cls: 'negative', color: 'red'    },
+        { label: '📈 Above Avg',       val: -r.above_average_penalty,      cls: 'negative', color: 'orange' },
+    ].filter(x => x.val !== 0);
+
+    const breakdownHtml = bItems.map(item => {
+        const pct = Math.min(Math.abs(item.val) / Math.abs(total) * 120, 100).toFixed(1);
+        return `
+            <div class="rk-brow">
+                <span class="rk-blabel">${item.label}</span>
+                <div class="rk-bbar-wrap">
+                    <div class="rk-bbar rk-bbar-${item.color}" style="width:${pct}%"></div>
+                </div>
+                <span class="rk-bval ${item.cls}">${item.val > 0 ? '+' : ''}${item.val}</span>
+            </div>`;
+    }).join('');
+
+    // Awards
+    let awardsHtml = '';
+    const active = (r.award_details || []).filter(a => !a.expired);
+    const expired = (r.award_details || []).filter(a => a.expired);
+    if (r.award_details && r.award_details.length) {
+        awardsHtml = `
+            <div class="rk-detail-section">
+                <div class="rk-dsection-header">
+                    <h5>🏆 Awards <span class="rk-count">${active.length} active${expired.length ? `, ${expired.length} expired` : ''}</span></h5>
+                    ${expired.length ? `<label class="rk-toggle-label"><input type="checkbox" class="show-inactive-cb" data-member-id="${r.member.id}"> Show expired</label>` : ''}
+                </div>
+                <div class="awards-compact-list" id="awards-list-${r.member.id}">
+                    ${active.length ? active.map(a => awardItemHtml(a)).join('') : '<p class="no-data">No active awards.</p>'}
+                </div>
+            </div>`;
+    } else {
+        awardsHtml = `<div class="rk-detail-section"><h5>🏆 Awards</h5><p class="no-data">No awards yet.</p></div>`;
+    }
+
+    // Conductor stats
+    const statsHtml = `
+        <div class="rk-detail-section">
+            <h5>📈 Conductor History</h5>
+            <div class="rk-stat-row">
+                <div class="rk-stat"><span class="rk-stat-val">${r.conductor_count}</span><span class="rk-stat-lbl">total runs</span></div>
+                <div class="rk-stat"><span class="rk-stat-val">${r.last_conductor_date ? formatDate(r.last_conductor_date) : '—'}</span><span class="rk-stat-lbl">last date</span></div>
+                ${r.days_since_last_conductor !== null ? `<div class="rk-stat"><span class="rk-stat-val">${r.days_since_last_conductor}d</span><span class="rk-stat-lbl">days ago</span></div>` : ''}
+            </div>
+        </div>`;
+
+    // Timeline
+    const timelineHtml = `
+        <div class="rk-detail-section rk-timeline-section">
+            <h5>📊 Timeline — Last 3 Months</h5>
+            <div class="rk-timeline-controls">
+                <label><input type="checkbox" class="timeline-opt" id="show-reset-${r.member.id}" data-member-id="${r.member.id}" checked> With resets</label>
+                <label><input type="checkbox" class="timeline-opt" id="show-power-${r.member.id}" data-member-id="${r.member.id}" checked> Power</label>
+                <button class="rk-advanced-btn" onclick="toggleAdvanced(${r.member.id}, this)">More ▸</button>
+            </div>
+            <div class="rk-timeline-advanced" id="advanced-${r.member.id}">
+                <label><input type="checkbox" class="timeline-opt" id="show-no-reset-${r.member.id}" data-member-id="${r.member.id}" checked> Cumulative (no resets)</label>
+                <label><input type="checkbox" class="timeline-opt" id="show-breakdown-${r.member.id}" data-member-id="${r.member.id}"> Point breakdown</label>
+                <label><input type="radio" name="scale-type-${r.member.id}" class="timeline-opt" data-member-id="${r.member.id}" value="linear" checked> Linear</label>
+                <label><input type="radio" name="scale-type-${r.member.id}" class="timeline-opt" data-member-id="${r.member.id}" value="logarithmic"> Log</label>
+            </div>
+            <div class="timeline-loading" id="timeline-loading-${r.member.id}"><p>Loading timeline...</p></div>
+            <canvas id="timeline-${r.member.id}" class="member-timeline-canvas" style="display:none"></canvas>
+        </div>`;
+
+    return `
+        <div class="rk-detail-columns">
+            <div class="rk-detail-col">
+                <div class="rk-detail-section">
+                    <h5>📊 Score Breakdown</h5>
+                    <div class="rk-breakdown">${breakdownHtml || '<p class="no-data">No contributions.</p>'}</div>
+                    <div class="rk-breakdown-total">Total: <strong>${r.total_score} pts</strong></div>
+                </div>
+                ${statsHtml}
+            </div>
+            <div class="rk-detail-col">${awardsHtml}</div>
+        </div>
+        ${timelineHtml}`;
+}
+
+function awardItemHtml(award, expired = false) {
+    return `
+        <div class="award-compact-item ${expired ? 'expired-award' : ''}">
+            <span class="award-icon-compact">${getRankEmoji(award.rank)}</span>
+            <div class="award-info-compact">
+                <span class="award-type-compact">${escapeHtml(award.award_type)}${expired ? ' <em>(expired)</em>' : ''}</span>
+                <span class="award-week-compact">${getWeeksAgo(award.week_date)}</span>
+            </div>
+            <span class="award-points-compact">+${award.points}</span>
+        </div>`;
+}
+
+function formatLastRunCell(days) {
+    if (days === null || days === undefined) return '<span class="rk-last-never">Never</span>';
+    if (days <= 7)  return `<span class="rk-last-recent">${days}d</span>`;
+    if (days <= 30) return `<span class="rk-last-mid">${days}d</span>`;
+    const wks = Math.floor(days / 7);
+    return `<span class="rk-last-old">${wks}w</span>`;
+}
+
+// ── Row toggle ────────────────────────────────────────────────────────────────
+
+function toggleRow(memberId) {
+    const detailRow = document.getElementById(`detail-row-${memberId}`);
+    const dataRow = document.querySelector(`tr.rk-row[data-member-id="${memberId}"]`);
+    if (!detailRow || !dataRow) return;
+
+    const isOpen = dataRow.classList.contains('rk-row-open');
+    dataRow.classList.toggle('rk-row-open', !isOpen);
+    detailRow.classList.toggle('rk-detail-open', !isOpen);
+    dataRow.querySelector('.rk-expand-icon').textContent = isOpen ? '▶' : '▼';
+
+    if (!isOpen && !detailRow.dataset.chartLoaded) {
+        detailRow.dataset.chartLoaded = 'true';
+        const ranking = filteredRankings.find(r => r.member.id === memberId);
+        if (ranking) loadSingleMemberTimeline(ranking);
+    }
+}
+
+function toggleAdvanced(memberId, btn) {
+    const el = document.getElementById(`advanced-${memberId}`);
+    if (!el) return;
+    const open = el.classList.toggle('rk-advanced-open');
+    btn.textContent = open ? 'Less ▾' : 'More ▸';
+}
+
+// ── Rank change indicators ────────────────────────────────────────────────────
+
+function getRankChangeIndicator(memberId, currentIndex) {
+    if (!previousRankingsMap || previousRankingsMap[memberId] === undefined) return '';
+    const diff = previousRankingsMap[memberId] - currentIndex;
+    if (diff > 0) return `<span class="rank-change rank-up" title="Up ${diff}">▲${diff}</span>`;
+    if (diff < 0) return `<span class="rank-change rank-down" title="Down ${Math.abs(diff)}">▼${Math.abs(diff)}</span>`;
+    return '<span class="rank-change rank-same">—</span>';
+}
+
+// ── Analytics chart ───────────────────────────────────────────────────────────
+
+function displayBreakdownChart(rankings) {
     applyChartTheme();
-    
-    // Destroy existing charts
-    Object.values(charts).forEach(chart => {
-        if (chart) chart.destroy();
-    });
-    charts = { score: null, conductor: null, pointsBreakdown: null };
-    
-    // 1. Score Distribution Chart
-    const scoreLabels = rankings.map((r, i) => `#${i + 1} ${r.member.name}`);
-    const scoreData = rankings.map(r => r.total_score);
-    
-    const scoreCanvas = document.getElementById('scoreChart');
-    const scoreCtx = scoreCanvas.getContext('2d');
-    charts.score = new Chart(scoreCtx, {
-        type: 'bar',
-        data: {
-            labels: scoreLabels.slice(0, 15),
-            datasets: [{
-                label: 'Total Score',
-                data: scoreData.slice(0, 15),
-                backgroundColor: getCSSColor('--accent-primary') + 'cc',
-                borderColor: getCSSColor('--accent-primary'),
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { display: false },
-                title: { display: false }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    title: { display: true, text: 'Points' }
-                }
-            }
-        }
-    });
-    
-    // 2. Conductor Frequency Chart
-    const conductorCounts = rankings.map(r => ({ name: r.member.name, count: r.conductor_count }));
-    conductorCounts.sort((a, b) => b.count - a.count);
-    
-    const conductorCanvas = document.getElementById('conductorChart');
-    const conductorCtx = conductorCanvas.getContext('2d');
-    charts.conductor = new Chart(conductorCtx, {
-        type: 'bar',
-        data: {
-            labels: conductorCounts.slice(0, 15).map(c => c.name),
-            datasets: [{
-                label: 'Conductor Count',
-                data: conductorCounts.slice(0, 15).map(c => c.count),
-                backgroundColor: getCSSColor('--color-orange') + 'cc',
-                borderColor: getCSSColor('--color-orange'),
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: { stepSize: 1 },
-                    title: { display: true, text: 'Times as Conductor' }
-                }
-            }
-        }
-    });
-    
-    // 3. Points Breakdown Chart (Top 10)
+    if (breakdownChart) { breakdownChart.destroy(); breakdownChart = null; }
+
     const top10 = rankings.slice(0, 10);
-    const pointsBreakdownCanvas = document.getElementById('pointsBreakdownChart');
-    const pointsBreakdownCtx = pointsBreakdownCanvas.getContext('2d');
-    charts.pointsBreakdown = new Chart(pointsBreakdownCtx, {
+    const ctx = document.getElementById('pointsBreakdownChart');
+    if (!ctx) return;
+
+    // Use theme-aware colors where possible
+    const gold    = getCSSColor('--medal-gold') || '#ffd700';
+    const teal    = getCSSColor('--bs-info')    || '#17a2b8';
+    const purple  = '#9b6fcc';
+    const blue    = getCSSColor('--info')       || '#3b82f6';
+    const red     = getCSSColor('--danger')     || '#ef4444';
+
+    breakdownChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: top10.map(r => r.member.name),
             datasets: [
-                {
-                    label: 'Awards',
-                    data: top10.map(r => r.award_points),
-                    backgroundColor: 'rgba(255, 205, 86, 0.8)'
-                },
-                {
-                    label: 'Recommendations',
-                    data: top10.map(r => r.recommendation_points),
-                    backgroundColor: 'rgba(75, 192, 192, 0.8)'
-                },
-                {
-                    label: 'Rank Boost',
-                    data: top10.map(r => r.rank_boost),
-                    backgroundColor: 'rgba(153, 102, 255, 0.8)'
-                },
-                {
-                    label: 'First Timer',
-                    data: top10.map(r => r.first_time_conductor_boost),
-                    backgroundColor: 'rgba(54, 162, 235, 0.8)'
-                },
-                {
-                    label: 'Recent Penalty',
-                    data: top10.map(r => -r.recent_conductor_penalty),
-                    backgroundColor: 'rgba(255, 99, 132, 0.8)'
-                },
-                {
-                    label: 'Above Avg Penalty',
-                    data: top10.map(r => -r.above_average_penalty),
-                    backgroundColor: 'rgba(255, 159, 64, 0.8)'
-                }
+                { label: 'Awards',       data: top10.map(r => r.award_points),              backgroundColor: gold   + 'cc' },
+                { label: 'Recs',         data: top10.map(r => r.recommendation_points),      backgroundColor: teal   + 'cc' },
+                { label: 'Rank Boost',   data: top10.map(r => r.rank_boost),                 backgroundColor: purple + 'cc' },
+                { label: 'First Timer',  data: top10.map(r => r.first_time_conductor_boost), backgroundColor: blue   + 'cc' },
+                { label: 'Penalties',    data: top10.map(r => -(r.recent_conductor_penalty + r.above_average_penalty)), backgroundColor: red + 'cc' },
             ]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { display: true, position: 'bottom' }
-            },
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, position: 'bottom' } },
             scales: {
                 x: { stacked: true },
-                y: { 
-                    stacked: true,
-                    title: { display: true, text: 'Points' }
-                }
+                y: { stacked: true, title: { display: true, text: 'Points' } }
             }
         }
     });
 }
 
-// Build a single member's timeline chart using cached data
-function buildMemberChart(ranking, timelineData) {
-    const memberData = timelineData[ranking.member.id];
-    const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
-    const canvas = document.getElementById(`timeline-${ranking.member.id}`);
-    
-    if (!memberData || memberData.dates.length === 0) {
-        if (loadingEl) loadingEl.innerHTML = '<p class="empty">No timeline data available.</p>';
-        return;
-    }
-    if (!canvas) return;
-    
-    // Hide loading, show canvas
-    if (loadingEl) loadingEl.style.display = 'none';
-    canvas.style.display = '';
-    
-    // Destroy any existing chart on this canvas
-    const existingChart = Chart.getChart(canvas);
-    if (existingChart) existingChart.destroy();
-    // Also remove from tracked array
-    memberTimelineCharts = memberTimelineCharts.filter(c => c.canvas !== canvas);
-            
-            // Get member-specific settings
-            const showReset = document.getElementById(`show-reset-${ranking.member.id}`)?.checked ?? true;
-            const showNoReset = document.getElementById(`show-no-reset-${ranking.member.id}`)?.checked ?? true;
-            const showBreakdown = document.getElementById(`show-breakdown-${ranking.member.id}`)?.checked ?? false;
-            const showPower = document.getElementById(`show-power-${ranking.member.id}`)?.checked ?? true;
-            const scaleType = document.querySelector(`input[name="scale-type-${ranking.member.id}"]:checked`)?.value || 'linear';
-            
-            const ctx = canvas.getContext('2d');
-            applyChartTheme();
-            
-            const datasets = [];
-            
-            // Show breakdown of points (stacked areas)
-            if (showBreakdown) {
-                if (showReset) {
-                    datasets.push({
-                        label: 'Awards',
-                        data: memberData.awards_with_reset,
-                        backgroundColor: 'rgba(255, 205, 86, 0.8)',
-                        borderColor: 'rgba(255, 205, 86, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Recommendations',
-                        data: memberData.recommendations_with_reset,
-                        backgroundColor: 'rgba(75, 192, 192, 0.8)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Rank Boost',
-                        data: memberData.rank_boost_with_reset,
-                        backgroundColor: 'rgba(153, 102, 255, 0.8)',
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'First Timer Boost',
-                        data: memberData.first_time_boost_with_reset,
-                        backgroundColor: 'rgba(54, 162, 235, 0.8)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                    // Penalties are negative
-                    datasets.push({
-                        label: 'Recent Penalty',
-                        data: memberData.recent_penalty_with_reset.map(v => -v),
-                        backgroundColor: 'rgba(255, 99, 132, 0.8)',
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Above Avg Penalty',
-                        data: memberData.above_avg_penalty_with_reset.map(v => -v),
-                        backgroundColor: 'rgba(255, 159, 64, 0.8)',
-                        borderColor: 'rgba(255, 159, 64, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'reset',
-                        yAxisID: 'y'
-                    });
-                }
-                if (showNoReset) {
-                    datasets.push({
-                        label: 'Awards (Cumulative)',
-                        data: memberData.awards_cumulative,
-                        backgroundColor: 'rgba(255, 205, 86, 0.5)',
-                        borderColor: 'rgba(255, 205, 86, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Recommendations (Cumulative)',
-                        data: memberData.recommendations_cumulative,
-                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Rank Boost (Cumulative)',
-                        data: memberData.rank_boost_cumulative,
-                        backgroundColor: 'rgba(153, 102, 255, 0.5)',
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'First Timer (Cumulative)',
-                        data: memberData.first_time_boost_cumulative,
-                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Recent Penalty (Cumulative)',
-                        data: memberData.recent_penalty_cumulative.map(v => -v),
-                        backgroundColor: 'rgba(255, 99, 132, 0.5)',
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                    datasets.push({
-                        label: 'Above Avg (Cumulative)',
-                        data: memberData.above_avg_penalty_cumulative.map(v => -v),
-                        backgroundColor: 'rgba(255, 159, 64, 0.5)',
-                        borderColor: 'rgba(255, 159, 64, 1)',
-                        borderWidth: 1,
-                        fill: true,
-                        stack: 'cumulative',
-                        yAxisID: 'y'
-                    });
-                }
-            } else {
-                // Show combined totals (lines)
-                if (showReset && memberData.points_with_reset) {
-                    datasets.push({
-                        label: 'With Train Resets',
-                        data: memberData.points_with_reset,
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.1,
-                        yAxisID: 'y'
-                    });
-                }
-                
-                if (showNoReset && memberData.points_cumulative) {
-                    datasets.push({
-                        label: 'Cumulative (No Reset)',
-                        data: memberData.points_cumulative,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        borderWidth: 2,
-                        yAxisID: 'y',
-                        fill: true,
-                        tension: 0.1
-                    });
-                }
-            }
-            
-            if (showPower && memberData.power) {
-                datasets.push({
-                    label: 'Power',
-                    data: memberData.power,
-                    borderColor: getCSSColor('--accent-primary'),
-                    backgroundColor: getCSSColor('--accent-primary') + '1a',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.1,
-                    yAxisID: 'y1'
-                });
-            }
-            
-            if (datasets.length === 0) return;
-            
-            // Create annotations for conductor assignments (vertical lines)
-            const annotations = {};
-            if (memberData.conductor_dates && memberData.conductor_dates.length > 0) {
-                memberData.conductor_dates.forEach((conductorWeek, idx) => {
-                    const weekIndex = memberData.dates.indexOf(conductorWeek);
-                    if (weekIndex !== -1) {
-                        annotations[`conductor-${idx}`] = {
-                            type: 'line',
-                            xMin: weekIndex,
-                            xMax: weekIndex,
-                            borderColor: 'rgba(255, 159, 64, 0.8)',
-                            borderWidth: 2,
-                            borderDash: [5, 5],
-                            label: {
-                                display: true,
-                                content: '🚂',
-                                position: 'start',
-                                yAdjust: -10,
-                                font: { size: 14 }
-                            }
-                        };
-                    }
-                });
-            }
-            
-            const chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: memberData.dates,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { 
-                            display: true, 
-                            position: 'top',
-                            labels: { font: { size: 11 } }
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        },
-                        annotation: {
-                            annotations: annotations
-                        }
-                    },
-                    scales: {
-                        x: {
-                            title: { display: true, text: 'Week', font: { size: 11 } },
-                            ticks: { 
-                                maxRotation: 45,
-                                minRotation: 45,
-                                font: { size: 9 }
-                            },
-                            stacked: showBreakdown
-                        },
-                        y: {
-                            type: scaleType,
-                            beginAtZero: true,
-                            position: 'left',
-                            title: { display: true, text: 'Points', font: { size: 11 } },
-                            ticks: { font: { size: 10 } },
-                            stacked: showBreakdown
-                        },
-                        y1: {
-                            type: 'linear',
-                            position: 'right',
-                            beginAtZero: false,
-                            title: { display: true, text: 'Power', font: { size: 11 }, color: 'rgba(102, 126, 234, 1)' },
-                            ticks: { 
-                                font: { size: 10 },
-                                color: 'rgba(102, 126, 234, 1)',
-                                callback: function(value) {
-                                    return formatPowerShort(value);
-                                }
-                            },
-                            grid: {
-                                drawOnChartArea: false
-                            }
-                        }
-                    },
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
-                    }
-                }
-            });
-            
-            memberTimelineCharts.push(chart);
+// ── Formula modal ─────────────────────────────────────────────────────────────
+
+function openFormulaModal() {
+    document.getElementById('formula-modal').style.display = 'flex';
 }
 
-// Format power for chart labels (short)
-function formatPowerShort(power) {
-    if (!power) return '0';
-    if (power >= 1000000000) {
-        return (power / 1000000000).toFixed(1) + 'B';
-    } else if (power >= 1000000) {
-        return (power / 1000000).toFixed(1) + 'M';
-    } else if (power >= 1000) {
-        return (power / 1000).toFixed(0) + 'K';
-    }
-    return power.toString();
+function closeFormulaModal() {
+    document.getElementById('formula-modal').style.display = 'none';
 }
 
-// Filter rankings
-function filterRankings() {
-    if (!currentData || !currentData.rankings) return;
-    
-    const nameFilter = document.getElementById('filter-name').value.toLowerCase().trim();
-    const rankFilter = document.getElementById('filter-rank').value;
-    
-    filteredRankings = currentData.rankings.filter(ranking => {
-        const nameMatch = !nameFilter || ranking.member.name.toLowerCase().includes(nameFilter);
-        const rankMatch = !rankFilter || ranking.member.rank === rankFilter;
-        return nameMatch && rankMatch;
-    });
-    
-    displayRankings(filteredRankings);
+function populateFormulaModal(settings, avgCount) {
+    document.getElementById('formula-content').innerHTML = `
+        <div class="system-info-grid">
+            <div class="system-info-item"><span class="info-label">🥇 1st Award</span><span class="info-value">+${settings.award_first_points} pts</span></div>
+            <div class="system-info-item"><span class="info-label">🥈 2nd Award</span><span class="info-value">+${settings.award_second_points} pts</span></div>
+            <div class="system-info-item"><span class="info-label">🥉 3rd Award</span><span class="info-value">+${settings.award_third_points} pts</span></div>
+            <div class="system-info-item"><span class="info-label">⭐ Recs</span><span class="info-value">5×√n pts / day</span></div>
+            <div class="system-info-item"><span class="info-label">🏅 R4/R5 Boost</span><span class="info-value">${settings.r4r5_rank_boost} × 2^(days/7)</span></div>
+            <div class="system-info-item"><span class="info-label">🎯 First Timer</span><span class="info-value">+${settings.first_time_conductor_boost} pts</span></div>
+            <div class="system-info-item"><span class="info-label">⏱️ Recent Penalty</span><span class="info-value">−${settings.recent_conductor_penalty_days} pts max</span></div>
+            <div class="system-info-item"><span class="info-label">📈 Above Avg Penalty</span><span class="info-value">−${settings.above_average_conductor_penalty} pts</span></div>
+        </div>
+        <p class="system-note">
+            Awards and recommendations accumulate week over week until the member runs as conductor, then they reset to zero.
+            <br>Avg conductor count: <strong>${avgCount.toFixed(2)}</strong>
+            &ensp;·&ensp; 1 rec = 5pts, 4 recs = 10pts, 9 recs = 15pts
+            &ensp;·&ensp; R4/R5 boost doubles every 7 days
+        </p>`;
 }
 
-// Clear filters
-function clearFilters() {
-    document.getElementById('filter-name').value = '';
-    document.getElementById('filter-rank').value = '';
-    document.getElementById('sort-by').value = 'total_score';
-    filteredRankings = currentData.rankings;
-    displayRankings(filteredRankings);
+// ── Inactive awards toggle ────────────────────────────────────────────────────
+
+function toggleInactiveAwards(memberId, show) {
+    const ranking = filteredRankings.find(r => r.member.id === memberId);
+    if (!ranking || !ranking.award_details) return;
+
+    const list = document.getElementById(`awards-list-${memberId}`);
+    if (!list) return;
+
+    const items = show ? ranking.award_details : ranking.award_details.filter(a => !a.expired);
+    list.innerHTML = items.length
+        ? items.map(a => awardItemHtml(a, a.expired)).join('')
+        : '<p class="no-data">No awards.</p>';
 }
 
-// Get rank badge color class
-function getRankBadgeClass(rank) {
-    switch (rank) {
-        case 'R5': return 'rank-badge-r5';
-        case 'R4': return 'rank-badge-r4';
-        case 'R3': return 'rank-badge-r3';
-        case 'R2': return 'rank-badge-r2';
-        case 'R1': return 'rank-badge-r1';
-        default: return '';
-    }
-}
+// ── Timeline chart (per-member, lazy) ─────────────────────────────────────────
 
-// Get rank change indicator
-function getRankChangeIndicator(memberId, currentIndex) {
-    if (!previousRankings || previousRankings[memberId] === undefined) return '';
-    const prevIndex = previousRankings[memberId];
-    const diff = prevIndex - currentIndex;
-    if (diff > 0) return `<span class="rank-change rank-up" title="Up ${diff}">▲ ${diff}</span>`;
-    if (diff < 0) return `<span class="rank-change rank-down" title="Down ${Math.abs(diff)}">▼ ${Math.abs(diff)}</span>`;
-    return '<span class="rank-change rank-same">—</span>';
-}
-
-// Display rankings
-function displayRankings(rankings) {
-    // Destroy existing member timeline charts
-    memberTimelineCharts.forEach(chart => chart.destroy());
-    memberTimelineCharts = [];
-
-    if (rankings.length === 0) {
-        document.getElementById('rankings-list').innerHTML = 
-            '<p class="empty">🧙 No survivors match these parameters. Try widening the search.</p>';
-        return;
-    }
-
-    let html = '';
-    rankings.forEach((ranking, index) => {
-        const rankClass = index === 0 ? 'rank-first' : index === 1 ? 'rank-second' : index === 2 ? 'rank-third' : '';
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
-        const changeIndicator = getRankChangeIndicator(ranking.member.id, index);
-        
-        html += `
-            <div class="ranking-card ${rankClass}" data-member-id="${ranking.member.id}">
-                <div class="ranking-header" onclick="toggleCardDetails(${ranking.member.id})">
-                    <div class="ranking-position">
-                        <span class="position-number">${medal} #${index + 1} ${changeIndicator}</span>
-                        <h4>${escapeHtml(ranking.member.name)} <span class="rank-badge ${getRankBadgeClass(ranking.member.rank)}">${ranking.member.rank}</span></h4>
-                    </div>
-                    <div class="total-score">
-                        <span class="score-value">${ranking.total_score}</span>
-                        <span class="score-label">pts</span>
-                    </div>
-                    <span class="expand-icon">▶</span>
-                </div>
-                
-                <div class="ranking-details collapsed" id="details-${ranking.member.id}">
-                    <div class="detail-section">
-                        <h5>📊 Score Breakdown</h5>
-                        <div class="detail-grid">
-                            <div class="detail-item positive">
-                                <span class="detail-label">🏆 Awards:</span>
-                                <span class="detail-value">+${ranking.award_points} pts</span>
-                            </div>
-                            <div class="detail-item positive">
-                                <span class="detail-label">⭐ Recommendations:</span>
-                                <span class="detail-value">+${ranking.recommendation_points} pts (${ranking.recommendation_count})</span>
-                            </div>
-                            <div class="detail-item positive">
-                                <span class="detail-label">🏅 Rank Boost:</span>
-                                <span class="detail-value">+${ranking.rank_boost} pts</span>
-                            </div>
-                            <div class="detail-item positive">
-                                <span class="detail-label">🎯 First Timer:</span>
-                                <span class="detail-value">+${ranking.first_time_conductor_boost} pts</span>
-                            </div>
-                            <div class="detail-item negative">
-                                <span class="detail-label">⏱️ Recent Conductor:</span>
-                                <span class="detail-value">-${ranking.recent_conductor_penalty} pts</span>
-                            </div>
-                            <div class="detail-item negative">
-                                <span class="detail-label">📈 Above Average:</span>
-                                <span class="detail-value">-${ranking.above_average_penalty} pts</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    ${ranking.award_details && ranking.award_details.length > 0 ? `
-                        <div class="detail-section">
-                            <div class="section-header-with-toggle">
-                                <h5>🏆 Award Details (${ranking.award_details.filter(a => !a.expired).length} active${ranking.award_details.some(a => a.expired) ? `, ${ranking.award_details.filter(a => a.expired).length} inactive` : ''})</h5>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="show-inactive-${ranking.member.id}" class="show-inactive-toggle" data-member-id="${ranking.member.id}">
-                                    <span>Show Inactive Awards</span>
-                                </label>
-                            </div>
-                            <div class="awards-compact-list" id="awards-list-${ranking.member.id}">
-                                ${ranking.award_details.filter(a => !a.expired).map(award => `
-                                    <div class="award-compact-item">
-                                        <span class="award-icon-compact">${getRankEmoji(award.rank)}</span>
-                                        <div class="award-info-compact">
-                                            <span class="award-type-compact">${escapeHtml(award.award_type)}</span>
-                                            <span class="award-week-compact">${getWeeksAgo(award.week_date)}</span>
-                                        </div>
-                                        <span class="award-points-compact">+${award.points}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    ` : `
-                        <div class="detail-section">
-                            <h5>🏆 Award Details</h5>
-                            <p class="no-awards">No awards yet</p>
-                        </div>
-                    `}
-                    
-                    <div class="detail-section">
-                        <h5>📈 Conductor Statistics</h5>
-                        <div class="stats-grid">
-                            <div class="stat-item">
-                                <span class="stat-label">Times as Conductor:</span>
-                                <span class="stat-value">${ranking.conductor_count}</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Last Conductor Date:</span>
-                                <span class="stat-value">${formatDate(ranking.last_conductor_date)}</span>
-                            </div>
-                            ${ranking.days_since_last_conductor !== null ? `
-                                <div class="stat-item">
-                                    <span class="stat-label">Days Since Last:</span>
-                                    <span class="stat-value">${ranking.days_since_last_conductor} days</span>
-                                </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                    
-                    <div class="detail-section">
-                        <h5>📊 Point Accumulation & Power Timeline (Last 3 Months)</h5>
-                        <div class="chart-options">
-                            <label>
-                                <input type="checkbox" id="show-reset-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}" checked>
-                                <span>Show with Train Resets</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" id="show-no-reset-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}" checked>
-                                <span>Show without Resets (Cumulative)</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" id="show-breakdown-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}">
-                                <span>📈 Show Point Breakdown (All Categories)</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" id="show-power-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}" checked>
-                                <span>⚡ Show Power</span>
-                            </label>
-                            <label>
-                                <input type="radio" name="scale-type-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}" value="linear" checked>
-                                <span>Linear Scale</span>
-                            </label>
-                            <label>
-                                <input type="radio" name="scale-type-${ranking.member.id}" class="timeline-option" data-member-id="${ranking.member.id}" value="logarithmic">
-                                <span>Logarithmic Scale</span>
-                            </label>
-                        </div>
-                        <div class="timeline-loading" id="timeline-loading-${ranking.member.id}">
-                            <p>📊 Loading timeline data...</p>
-                        </div>
-                        <canvas id="timeline-${ranking.member.id}" class="member-timeline-canvas" style="display:none;"></canvas>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    document.getElementById('rankings-list').innerHTML = html;
-    
-    // Add event listeners for timeline options — rebuild only that member's chart
-    document.querySelectorAll('.timeline-option').forEach(element => {
-        element.addEventListener('change', (e) => {
-            const memberId = parseInt(e.target.dataset.memberId);
-            rebuildSingleMemberChart(memberId);
-        });
-    });
-    
-    // Add event listeners for show inactive awards toggle (per member)
-    document.querySelectorAll('.show-inactive-toggle').forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-            const memberId = parseInt(e.target.dataset.memberId);
-            toggleInactiveAwards(memberId, e.target.checked);
-        });
-    });
-}
-
-// Toggle card details and lazy-load chart
-function toggleCardDetails(memberId) {
-    const details = document.getElementById(`details-${memberId}`);
-    const card = details.closest('.ranking-card');
-    const icon = card.querySelector('.expand-icon');
-    
-    if (details.classList.contains('collapsed')) {
-        details.classList.remove('collapsed');
-        icon.textContent = '▼';
-        // Lazy-load timeline chart on first expand
-        if (!details.dataset.chartLoaded) {
-            details.dataset.chartLoaded = 'true';
-            const ranking = filteredRankings.find(r => r.member.id === memberId);
-            if (ranking) {
-                loadSingleMemberTimeline(ranking);
-            }
-        }
-    } else {
-        details.classList.add('collapsed');
-        icon.textContent = '▶';
-    }
-}
-
-// Load timeline for a single member (lazy)
 async function loadSingleMemberTimeline(ranking) {
     if (!cachedTimelineData) {
         try {
-            const response = await fetch(`${API_BASE}/member-timelines?months=3`);
-            if (!response.ok) throw new Error('Failed to load timeline data');
-            cachedTimelineData = await response.json();
+            const resp = await fetch(`${API_BASE}/member-timelines?months=3`);
+            if (!resp.ok) throw new Error('Failed to load timeline');
+            cachedTimelineData = await resp.json();
         } catch (error) {
-            console.error('Error loading timeline data:', error);
-            const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
-            if (loadingEl) loadingEl.innerHTML = '<p class="error">Failed to load timeline.</p>';
+            console.error(error);
+            const el = document.getElementById(`timeline-loading-${ranking.member.id}`);
+            if (el) el.innerHTML = '<p class="error-message">Failed to load timeline.</p>';
             return;
         }
     }
     buildMemberChart(ranking, cachedTimelineData);
 }
 
-// Rebuild a single member's chart when options change
 function rebuildSingleMemberChart(memberId) {
     if (!cachedTimelineData) return;
     const ranking = filteredRankings.find(r => r.member.id === memberId);
     if (ranking) buildMemberChart(ranking, cachedTimelineData);
 }
 
-// Toggle inactive awards for a specific member
-function toggleInactiveAwards(memberId, showInactive) {
-    const ranking = filteredRankings.find(r => r.member.id === memberId);
-    if (!ranking || !ranking.award_details) return;
-    
-    const awardsList = document.getElementById(`awards-list-${memberId}`);
-    if (!awardsList) return;
-    
-    if (showInactive) {
-        // Show all awards including inactive
-        awardsList.innerHTML = ranking.award_details.map(award => `
-            <div class="award-compact-item ${award.expired ? 'expired-award' : ''}">
-                <span class="award-icon-compact">${getRankEmoji(award.rank)}</span>
-                <div class="award-info-compact">
-                    <span class="award-type-compact">${escapeHtml(award.award_type)}${award.expired ? ' (Expired)' : ''}</span>
-                    <span class="award-week-compact">${getWeeksAgo(award.week_date)}</span>
-                </div>
-                <span class="award-points-compact">+${award.points}</span>
-            </div>
-        `).join('');
+function buildMemberChart(ranking, timelineData) {
+    const memberData = timelineData[ranking.member.id];
+    const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
+    const canvas = document.getElementById(`timeline-${ranking.member.id}`);
+
+    if (!memberData || memberData.dates.length === 0) {
+        if (loadingEl) loadingEl.innerHTML = '<p class="empty">No timeline data available.</p>';
+        return;
+    }
+    if (!canvas) return;
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    canvas.style.display = '';
+
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart) existingChart.destroy();
+    memberTimelineCharts = memberTimelineCharts.filter(c => c.canvas !== canvas);
+
+    const showReset    = document.getElementById(`show-reset-${ranking.member.id}`)?.checked ?? true;
+    const showNoReset  = document.getElementById(`show-no-reset-${ranking.member.id}`)?.checked ?? true;
+    const showBreakdown = document.getElementById(`show-breakdown-${ranking.member.id}`)?.checked ?? false;
+    const showPower    = document.getElementById(`show-power-${ranking.member.id}`)?.checked ?? true;
+    const scaleType    = document.querySelector(`input[name="scale-type-${ranking.member.id}"]:checked`)?.value || 'linear';
+
+    applyChartTheme();
+    const datasets = [];
+
+    if (showBreakdown) {
+        const addStack = (label, data, color, stack) => {
+            if (!data) return;
+            datasets.push({ label, data, backgroundColor: color + '99', borderColor: color, borderWidth: 1, fill: true, stack, yAxisID: 'y' });
+        };
+        const colors = { awards: '#ffd700', recs: '#17a2b8', boost: '#9b6fcc', first: '#3b82f6', penalty: '#ef4444', above: '#f59e0b' };
+        if (showReset) {
+            addStack('Awards',          memberData.awards_with_reset,              colors.awards,   'reset');
+            addStack('Recs',            memberData.recommendations_with_reset,     colors.recs,     'reset');
+            addStack('Rank Boost',      memberData.rank_boost_with_reset,          colors.boost,    'reset');
+            addStack('First Timer',     memberData.first_time_boost_with_reset,    colors.first,    'reset');
+            addStack('Recent Penalty',  (memberData.recent_penalty_with_reset || []).map(v => -v),  colors.penalty, 'reset');
+            addStack('Above Avg',       (memberData.above_avg_penalty_with_reset || []).map(v => -v), colors.above, 'reset');
+        }
+        if (showNoReset) {
+            addStack('Awards (Cum)',    memberData.awards_cumulative,              colors.awards + '88', 'cumul');
+            addStack('Recs (Cum)',      memberData.recommendations_cumulative,     colors.recs   + '88', 'cumul');
+            addStack('Boost (Cum)',     memberData.rank_boost_cumulative,          colors.boost  + '88', 'cumul');
+            addStack('First (Cum)',     memberData.first_time_boost_cumulative,    colors.first  + '88', 'cumul');
+        }
     } else {
-        // Show only active awards
-        awardsList.innerHTML = ranking.award_details.filter(a => !a.expired).map(award => `
-            <div class="award-compact-item">
-                <span class="award-icon-compact">${getRankEmoji(award.rank)}</span>
-                <div class="award-info-compact">
-                    <span class="award-type-compact">${escapeHtml(award.award_type)}</span>
-                    <span class="award-week-compact">${getWeeksAgo(award.week_date)}</span>
-                </div>
-                <span class="award-points-compact">+${award.points}</span>
-            </div>
-        `).join('');
+        if (showReset && memberData.points_with_reset) {
+            datasets.push({ label: 'With Resets', data: memberData.points_with_reset, borderColor: getCSSColor('--accent-primary'), backgroundColor: getCSSColor('--accent-primary') + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y' });
+        }
+        if (showNoReset && memberData.points_cumulative) {
+            datasets.push({ label: 'Cumulative', data: memberData.points_cumulative, borderColor: getCSSColor('--bs-info') || '#17a2b8', backgroundColor: (getCSSColor('--bs-info') || '#17a2b8') + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y' });
+        }
     }
-}
 
-// Event listeners for chart options (removed global listeners, now per-member)
-
-// Get rank emoji
-function getRankEmoji(rank) {
-    switch(rank) {
-        case 1: return '🥇';
-        case 2: return '🥈';
-        case 3: return '🥉';
-        default: return '🏅';
+    if (showPower && memberData.power) {
+        datasets.push({ label: 'Power', data: memberData.power, borderColor: getCSSColor('--accent-primary'), backgroundColor: 'transparent', borderWidth: 2, fill: false, tension: 0.2, yAxisID: 'y1' });
     }
-}
 
-// Get place text
-function getPlaceText(rank) {
-    switch(rank) {
-        case 1: return '1st Place';
-        case 2: return '2nd Place';
-        case 3: return '3rd Place';
-        default: return `${rank}th Place`;
-    }
-}
+    if (!datasets.length) return;
 
-// Get weeks ago text
-function getWeeksAgo(weekDate) {
-    const awardDate = new Date(weekDate);
-    const today = new Date();
-    
-    // Calculate Monday of current week (handle Sunday where getDay() === 0)
-    const currentMonday = new Date(today);
-    const day = today.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    currentMonday.setDate(today.getDate() - diff);
-    currentMonday.setHours(0, 0, 0, 0);
-    
-    // Calculate difference in weeks
-    const diffTime = currentMonday - awardDate;
-    const diffWeeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
-    
-    if (diffWeeks === 0) {
-        return 'This week';
-    } else if (diffWeeks === 1) {
-        return 'Last week';
-    } else if (diffWeeks === 2) {
-        return '2 weeks ago';
-    } else if (diffWeeks === 3) {
-        return '3 weeks ago';
-    } else if (diffWeeks === 4) {
-        return '4 weeks ago';
-    } else {
-        return `${diffWeeks} weeks ago`;
-    }
-}
-
-// Escape HTML
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Refresh rankings
-document.getElementById('refresh-btn').addEventListener('click', loadRankings);
-
-// Debounce utility
-function debounce(fn, delay) {
-    let timer;
-    return function(...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
-    };
-}
-
-// Sort rankings
-function sortRankings() {
-    if (!filteredRankings) return;
-    const sortBy = document.getElementById('sort-by').value;
-    
-    filteredRankings.sort((a, b) => {
-        switch (sortBy) {
-            case 'total_score':
-                return b.total_score - a.total_score;
-            case 'conductor_count':
-                return b.conductor_count - a.conductor_count;
-            case 'days_since':
-                return (b.days_since_last_conductor ?? 9999) - (a.days_since_last_conductor ?? 9999);
-            case 'award_points':
-                return b.award_points - a.award_points;
-            case 'recommendation_points':
-                return b.recommendation_points - a.recommendation_points;
-            case 'name':
-                return a.member.name.localeCompare(b.member.name);
-            default:
-                return 0;
+    // Conductor-date annotations
+    const annotations = {};
+    (memberData.conductor_dates || []).forEach((d, idx) => {
+        const wi = memberData.dates.indexOf(d);
+        if (wi !== -1) {
+            annotations[`c-${idx}`] = {
+                type: 'line', xMin: wi, xMax: wi,
+                borderColor: 'rgba(255,159,64,0.8)', borderWidth: 2, borderDash: [5,5],
+                label: { display: true, content: '🚂', position: 'start', yAdjust: -10, font: { size: 13 } }
+            };
         }
     });
-    displayRankings(filteredRankings);
+
+    const chart = new Chart(canvas, {
+        type: 'line',
+        data: { labels: memberData.dates, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { display: true, position: 'top', labels: { font: { size: 11 } } },
+                tooltip: { mode: 'index', intersect: false },
+                annotation: { annotations }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Week', font: { size: 11 } }, ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } }, stacked: showBreakdown },
+                y: { type: scaleType, beginAtZero: true, position: 'left', title: { display: true, text: 'Points', font: { size: 11 } }, ticks: { font: { size: 10 } }, stacked: showBreakdown },
+                y1: { type: 'linear', position: 'right', beginAtZero: false, title: { display: true, text: 'Power', font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => formatPowerShort(v) }, grid: { drawOnChartArea: false } }
+            },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+    memberTimelineCharts.push(chart);
 }
 
-// Export rankings to CSV
+// ── CSV export ────────────────────────────────────────────────────────────────
+
 function exportCSV() {
-    if (!filteredRankings || filteredRankings.length === 0) return;
-    
-    const headers = ['Rank', 'Name', 'Alliance Rank', 'Total Score', 'Award Points', 'Recommendation Points', 'Rank Boost', 'First Timer Boost', 'Recent Conductor Penalty', 'Above Average Penalty', 'Conductor Count', 'Last Conductor Date'];
+    if (!filteredRankings || !filteredRankings.length) return;
+    const headers = ['Rank','Name','Alliance Rank','Total Score','Award Points','Rec Points','Rank Boost','First Timer','Recent Penalty','Above Avg Penalty','Conductor Count','Last Conductor Date'];
     const rows = filteredRankings.map((r, i) => [
         i + 1,
         '"' + r.member.name.replace(/"/g, '""') + '"',
@@ -1046,29 +615,80 @@ function exportCSV() {
         r.conductor_count,
         r.last_conductor_date || ''
     ]);
-    
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `rankings_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    Object.assign(document.createElement('a'), { href: url, download: `rankings_${new Date().toISOString().slice(0,10)}.csv` }).click();
     URL.revokeObjectURL(url);
 }
 
-// Initialize
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+function formatPowerShort(v) {
+    if (!v) return '0';
+    if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    return String(v);
+}
+
+function getRankEmoji(rank) {
+    return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || '🏅';
+}
+
+function getWeeksAgo(weekDate) {
+    const award = new Date(weekDate);
+    const today = new Date();
+    const day = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+    monday.setHours(0, 0, 0, 0);
+    const weeks = Math.floor((monday - award) / (7 * 24 * 60 * 60 * 1000));
+    if (weeks <= 0) return 'This week';
+    if (weeks === 1) return 'Last week';
+    return `${weeks} weeks ago`;
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+}
+
+function debounce(fn, delay) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', async () => {
     const auth = await checkAuth();
-    if (auth) {
-        setupEventListeners(auth);
-        await loadRankings();
-        
-        // Add filter event listeners with debounce on text input
-        document.getElementById('filter-name').addEventListener('input', debounce(filterRankings, 300));
-        document.getElementById('filter-rank').addEventListener('change', filterRankings);
-        document.getElementById('sort-by').addEventListener('change', sortRankings);
-        document.getElementById('clear-filters-btn').addEventListener('click', clearFilters);
-        document.getElementById('export-csv-btn').addEventListener('click', exportCSV);
-    }
+    if (!auth) return;
+    setupEventListeners(auth);
+    await loadRankings();
+
+    document.getElementById('filter-name').addEventListener('input', debounce(applyFiltersAndSort, 300));
+    document.getElementById('sort-by').addEventListener('change', applyFiltersAndSort);
+    document.getElementById('refresh-btn').addEventListener('click', loadRankings);
+    document.getElementById('export-csv-btn').addEventListener('click', exportCSV);
+
+    document.getElementById('rank-chips').addEventListener('click', e => {
+        const chip = e.target.closest('.filter-chip');
+        if (chip) setActiveChip(chip.dataset.rank);
+    });
+
+    document.getElementById('formula-modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeFormulaModal();
+    });
+
+    // Render analytics chart when the collapsible opens
+    document.querySelector('.rk-analytics').addEventListener('toggle', e => {
+        if (e.target.open && currentData) displayBreakdownChart(currentData.rankings);
+    });
 });

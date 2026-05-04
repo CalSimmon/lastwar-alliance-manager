@@ -7182,6 +7182,602 @@ section:last-child {
 }
 
 /* ========================================
+   RANKINGS PAGE  (rk-* namespace)
+   ======================================== */
+
+/* ── Up Next strip ───────────────────────────────────────────────────────── */
+.rk-up-next-section {
+    margin-bottom: 1.5rem;
+}
+
+.rk-up-next-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.rk-up-next-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.rk-up-next-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.rk-meta-sep {
+    opacity: 0.4;
+}
+
+.rk-formula-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.rk-formula-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.rk-up-next-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+}
+
+.rk-up-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    position: relative;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.rk-up-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px var(--shadow-md);
+}
+
+.rk-up-1 { border-top: 3px solid var(--medal-gold, #ffd700); }
+.rk-up-2 { border-top: 3px solid var(--medal-silver, #c0c0c0); }
+.rk-up-3 { border-top: 3px solid var(--medal-bronze, #cd7f32); }
+
+.rk-up-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.3rem;
+}
+
+.rk-up-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.rk-up-score {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--accent-primary);
+    line-height: 1;
+    margin-bottom: 0.15rem;
+}
+
+.rk-up-pts {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.rk-up-since {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.rk-never {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.first-timer-badge {
+    font-size: 0.8em;
+    opacity: 0.85;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────────── */
+.rk-section {
+    margin-bottom: 1.5rem;
+}
+
+.rk-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.rk-search-input {
+    flex: 1 1 160px;
+    min-width: 130px;
+    padding: 7px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--input-bg, var(--container-bg));
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+
+.rk-search-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.rk-rank-chips {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.rk-first-timer-chip {
+    font-size: 0.8em;
+    padding: 6px 12px;
+}
+
+.rk-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.rk-sort-select {
+    padding: 7px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--input-bg, var(--container-bg));
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+/* ── Rankings table ───────────────────────────────────────────────────────── */
+.rk-table-wrapper {
+    overflow-x: auto;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.rk-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.rk-table thead th {
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.rk-table tbody tr.rk-row {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.rk-table tbody tr.rk-row:hover {
+    background: var(--card-bg);
+}
+
+.rk-table tbody tr.rk-row.rk-row-open {
+    background: var(--card-bg);
+}
+
+.rk-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+    color: var(--text-primary);
+}
+
+.rk-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* column widths */
+.rk-col-pos    { width: 56px; text-align: center; font-weight: 700; white-space: nowrap; }
+.rk-col-name   { min-width: 140px; }
+.rk-col-score  { width: 120px; }
+.rk-col-runs   { width: 60px; text-align: center; }
+.rk-col-since  { width: 80px; text-align: center; }
+.rk-col-awards { width: 70px; text-align: center; }
+.rk-col-recs   { width: 70px; text-align: center; }
+.rk-col-expand { width: 32px; text-align: center; color: var(--text-muted); }
+
+.rk-member-name {
+    font-weight: 600;
+    margin-right: 0.3rem;
+}
+
+.rk-score-num {
+    display: block;
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--accent-primary);
+    margin-bottom: 3px;
+}
+
+.rk-score-bar {
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.rk-score-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+
+.rk-zero {
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+
+.rk-expand-icon {
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+    display: inline-block;
+    color: var(--text-muted);
+}
+
+/* ── Detail row ───────────────────────────────────────────────────────────── */
+.rk-detail-row {
+    display: none;
+}
+
+.rk-detail-row.rk-detail-open {
+    display: table-row;
+}
+
+.rk-detail-row td {
+    padding: 0;
+    background: var(--container-bg);
+    border-bottom: 2px solid var(--accent-primary);
+}
+
+.rk-detail-inner {
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.rk-detail-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.rk-detail-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.rk-detail-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+}
+
+.rk-detail-section h5 {
+    margin: 0 0 0.6rem 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.rk-dsection-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.rk-dsection-header h5 {
+    margin: 0;
+}
+
+.rk-count {
+    font-weight: 400;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-left: 0.3rem;
+}
+
+.rk-toggle-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+/* ── Score breakdown bars ─────────────────────────────────────────────────── */
+.rk-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.rk-breakdown-total {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+.rk-brow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.rk-blabel {
+    width: 110px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rk-bbar-wrap {
+    flex: 1;
+    height: 8px;
+    background: var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.rk-bbar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+
+.rk-bbar-gold   { background: var(--medal-gold, #ffd700); }
+.rk-bbar-teal   { background: var(--bs-info, #17a2b8); }
+.rk-bbar-purple { background: #9b6fcc; }
+.rk-bbar-blue   { background: var(--info, #3b82f6); }
+.rk-bbar-red    { background: var(--danger, #ef4444); }
+.rk-bbar-orange { background: var(--bs-warning, #f59e0b); }
+
+.rk-bval {
+    width: 40px;
+    text-align: right;
+    font-weight: 700;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+}
+
+.rk-bval.positive { color: var(--bs-success); }
+.rk-bval.negative { color: var(--danger); }
+
+/* ── Conductor stats ──────────────────────────────────────────────────────── */
+.rk-stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.rk-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 60px;
+}
+
+.rk-stat-val {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.rk-stat-lbl {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* ── Timeline section ─────────────────────────────────────────────────────── */
+.rk-timeline-section {
+    margin-top: 0;
+}
+
+.rk-timeline-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.rk-timeline-controls label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    cursor: pointer;
+}
+
+.rk-advanced-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-left: auto;
+}
+
+.rk-advanced-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.rk-timeline-advanced {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.5rem 0 0.25rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border-top: 1px dashed var(--border-color);
+    margin-bottom: 0.5rem;
+}
+
+.rk-timeline-advanced label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    cursor: pointer;
+}
+
+.rk-timeline-advanced.rk-advanced-open {
+    display: flex;
+}
+
+.member-timeline-canvas {
+    max-height: 220px;
+}
+
+/* ── Last-run cell colors ─────────────────────────────────────────────────── */
+.rk-last-never  { color: var(--text-muted); font-style: italic; }
+.rk-last-recent { color: var(--bs-success, #22c55e); font-weight: 600; }
+.rk-last-mid    { color: var(--bs-warning, #f59e0b); font-weight: 600; }
+.rk-last-old    { color: var(--danger, #ef4444); font-weight: 600; }
+
+/* ── Analytics collapsible ────────────────────────────────────────────────── */
+.rk-analytics {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.rk-analytics-summary {
+    padding: 0.85rem 1.1rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    color: var(--text-primary);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background 0.15s;
+}
+
+.rk-analytics-summary::-webkit-details-marker { display: none; }
+
+.rk-analytics-summary:hover {
+    background: var(--container-bg);
+}
+
+.rk-analytics-body {
+    padding: 0.75rem 1rem 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.rk-analytics-canvas {
+    max-height: 280px;
+}
+
+/* ── Mobile overrides ─────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .rk-up-next-list {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+
+    .rk-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .rk-actions {
+        margin-left: 0;
+        justify-content: flex-end;
+    }
+
+    .rk-rank-chips {
+        order: -1;
+    }
+
+    .rk-detail-columns {
+        grid-template-columns: 1fr;
+    }
+
+    .rk-col-awards,
+    .rk-col-recs {
+        display: none;
+    }
+
+    .rk-blabel {
+        width: 90px;
+    }
+
+    .rk-analytics-canvas {
+        max-height: 200px;
+    }
+}
+
+/* ========================================
    REDUCED MOTION ACCESSIBILITY
    ======================================== */
 @media (prefers-reduced-motion: reduce) {
