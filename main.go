@@ -4559,6 +4559,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 		aboveAvgPenaltyWithReset := []int{}
 		aboveAvgPenaltyCumulative := []int{}
 		powerValues := []int{}
+		lastKnownPower := 0
 
 		currentPoints := 0
 		cumulativePoints := 0
@@ -4689,7 +4690,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 				currentAboveAvgPenalty = 0
 			}
 
-			// Find max power value for this week
+			// Find max power value for this week; fall back to last known value
 			weekMaxPower := 0
 			for powerDate, power := range powerHistoryMap {
 				if powerDate >= weekStartStr && powerDate <= weekEndStr {
@@ -4697,6 +4698,11 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 						weekMaxPower = power
 					}
 				}
+			}
+			if weekMaxPower > 0 {
+				lastKnownPower = weekMaxPower
+			} else {
+				weekMaxPower = lastKnownPower
 			}
 
 			pointsWithReset = append(pointsWithReset, currentPoints)
