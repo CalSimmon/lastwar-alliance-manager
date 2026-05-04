@@ -207,10 +207,12 @@ type Settings struct {
 	ScheduleMessageTemplate      string `json:"schedule_message_template"`
 	DailyMessageTemplate         string `json:"daily_message_template"`
 	PowerTrackingEnabled         bool   `json:"power_tracking_enabled"`
-	ServerTimezone               string `json:"server_timezone"`   // Game/Alliance timezone for date calculations
-	ConductorTime                string `json:"conductor_time"`    // Time for conductor in HH:MM format (e.g., "15:00")
-	BackupTime                   string `json:"backup_time"`       // Time for backup in HH:MM format (e.g., "16:30")
-	DisplayTimezones             string `json:"display_timezones"` // JSON array of timezones to display (e.g., ["Europe/London", "Europe/Paris"])
+	ServerTimezone               string `json:"server_timezone"`
+	ConductorTime                string `json:"conductor_time"`
+	BackupTime                   string `json:"backup_time"`
+	DisplayTimezones             string `json:"display_timezones"`
+	VSPointsDailyTarget          int    `json:"vs_points_daily_target"`
+	VSPointsWeeklyTarget         int    `json:"vs_points_weekly_target"`
 }
 
 type MemberRanking struct {
@@ -1379,6 +1381,21 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added alliance_name column to settings table")
+	}
+
+	// Migrate settings table to add vs_points targets columns if missing
+	var vsDailyTargetColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='vs_points_daily_target'`).Scan(&vsDailyTargetColumnExists)
+	if err != nil || !vsDailyTargetColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN vs_points_daily_target INTEGER NOT NULL DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN vs_points_weekly_target INTEGER NOT NULL DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added vs_points_daily_target and vs_points_weekly_target columns to settings table")
 	}
 
 	// Migrate settings table to add alliance_short_name column if missing
@@ -3566,6 +3583,143 @@ func deleteWeekVSPoints(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// VS compliance report: per-member daily/weekly target status for the last N weeks
+func getVSCompliance(w http.ResponseWriter, r *http.Request) {
+	weeksParam := r.URL.Query().Get("weeks")
+	numWeeks := 4
+	if weeksParam != "" {
+		if n, err := strconv.Atoi(weeksParam); err == nil && n > 0 && n <= 12 {
+			numWeeks = n
+		}
+	}
+
+	// Load targets from settings
+	var dailyTarget, weeklyTarget int
+	db.QueryRow(`SELECT COALESCE(vs_points_daily_target,0), COALESCE(vs_points_weekly_target,0) FROM settings WHERE id=1`).Scan(&dailyTarget, &weeklyTarget)
+
+	// Load all active members
+	memberRows, err := db.Query(`SELECT id, name, rank FROM members WHERE deleted_at IS NULL ORDER BY name`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer memberRows.Close()
+
+	type Member struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+		Rank string `json:"rank"`
+	}
+	var members []Member
+	for memberRows.Next() {
+		var m Member
+		if err := memberRows.Scan(&m.ID, &m.Name, &m.Rank); err != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	memberRows.Close()
+
+	type MemberCompliance struct {
+		MemberID    int    `json:"member_id"`
+		Name        string `json:"name"`
+		Rank        string `json:"rank"`
+		Monday      int    `json:"monday"`
+		Tuesday     int    `json:"tuesday"`
+		Wednesday   int    `json:"wednesday"`
+		Thursday    int    `json:"thursday"`
+		Friday      int    `json:"friday"`
+		Saturday    int    `json:"saturday"`
+		WeeklyTotal int    `json:"weekly_total"`
+		WeeklyMet   bool   `json:"weekly_met"`
+		DaysMet     int    `json:"days_met"`
+		HasData     bool   `json:"has_data"`
+	}
+
+	type WeekCompliance struct {
+		WeekDate  string             `json:"week_date"`
+		WeekLabel string             `json:"week_label"`
+		Members   []MemberCompliance `json:"members"`
+	}
+
+	now := getServerTime()
+	currentMonday := getMondayOfWeek(now)
+
+	// Build vs_points lookup for all needed weeks in one query
+	startDate := currentMonday.AddDate(0, 0, -(numWeeks-1)*7)
+	vsRows, err := db.Query(`
+		SELECT member_id, week_date,
+		       COALESCE(monday,0), COALESCE(tuesday,0), COALESCE(wednesday,0),
+		       COALESCE(thursday,0), COALESCE(friday,0), COALESCE(saturday,0)
+		FROM vs_points
+		WHERE week_date >= ?
+		ORDER BY week_date ASC
+	`, formatDateString(startDate))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer vsRows.Close()
+
+	// Map: weekDate -> memberID -> row data
+	type vsRow struct{ Mon, Tue, Wed, Thu, Fri, Sat int }
+	vsData := make(map[string]map[int]vsRow)
+	for vsRows.Next() {
+		var memberID int
+		var weekDate string
+		var row vsRow
+		if err := vsRows.Scan(&memberID, &weekDate, &row.Mon, &row.Tue, &row.Wed, &row.Thu, &row.Fri, &row.Sat); err != nil {
+			continue
+		}
+		if vsData[weekDate] == nil {
+			vsData[weekDate] = make(map[int]vsRow)
+		}
+		vsData[weekDate][memberID] = row
+	}
+	vsRows.Close()
+
+	// Build compliance result for each week (most recent first)
+	weeks := []WeekCompliance{}
+	for i := numWeeks - 1; i >= 0; i-- {
+		monday := currentMonday.AddDate(0, 0, -i*7)
+		sunday := monday.AddDate(0, 0, 6)
+		weekDate := formatDateString(monday)
+		weekLabel := fmt.Sprintf("%s – %s", monday.Format("Jan 2"), sunday.Format("Jan 2"))
+
+		weekVS := vsData[weekDate]
+		memberList := make([]MemberCompliance, 0, len(members))
+		for _, m := range members {
+			mc := MemberCompliance{MemberID: m.ID, Name: m.Name, Rank: m.Rank}
+			if row, ok := weekVS[m.ID]; ok {
+				mc.Monday, mc.Tuesday, mc.Wednesday = row.Mon, row.Tue, row.Wed
+				mc.Thursday, mc.Friday, mc.Saturday = row.Thu, row.Fri, row.Sat
+				mc.WeeklyTotal = row.Mon + row.Tue + row.Wed + row.Thu + row.Fri + row.Sat
+				mc.HasData = true
+				days := []int{row.Mon, row.Tue, row.Wed, row.Thu, row.Fri, row.Sat}
+				for _, d := range days {
+					if dailyTarget > 0 && d >= dailyTarget {
+						mc.DaysMet++
+					} else if dailyTarget == 0 && d > 0 {
+						mc.DaysMet++
+					}
+				}
+				mc.WeeklyMet = weeklyTarget > 0 && mc.WeeklyTotal >= weeklyTarget
+			}
+			memberList = append(memberList, mc)
+		}
+		weeks = append(weeks, WeekCompliance{WeekDate: weekDate, WeekLabel: weekLabel, Members: memberList})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"targets": map[string]int{
+			"daily":  dailyTarget,
+			"weekly": weeklyTarget,
+		},
+		"weeks": weeks,
+	})
+}
+
 // Get all award types
 func getAwardTypes(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
@@ -4066,7 +4220,9 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		COALESCE(server_timezone, 'UTC') as server_timezone,
 		COALESCE(conductor_time, '15:00') as conductor_time,
 		COALESCE(backup_time, '16:30') as backup_time,
-		COALESCE(display_timezones, '["Europe/London"]') as display_timezones
+		COALESCE(display_timezones, '["Europe/London"]') as display_timezones,
+		COALESCE(vs_points_daily_target, 0) as vs_points_daily_target,
+		COALESCE(vs_points_weekly_target, 0) as vs_points_weekly_target
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AllianceName,
@@ -4086,6 +4242,8 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		&settings.ConductorTime,
 		&settings.BackupTime,
 		&settings.DisplayTimezones,
+		&settings.VSPointsDailyTarget,
+		&settings.VSPointsWeeklyTarget,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -4114,14 +4272,14 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.ServerTimezone = "UTC"
 	}
 
-	_, err := db.Exec(`UPDATE settings SET 
+	_, err := db.Exec(`UPDATE settings SET
 		alliance_name = ?,
 		alliance_short_name = ?,
-		award_first_points = ?, 
-		award_second_points = ?, 
-		award_third_points = ?, 
-		recommendation_points = ?, 
-		recent_conductor_penalty_days = ?, 
+		award_first_points = ?,
+		award_second_points = ?,
+		award_third_points = ?,
+		recommendation_points = ?,
+		recent_conductor_penalty_days = ?,
 		above_average_conductor_penalty = ?,
 		r4r5_rank_boost = ?,
 		first_time_conductor_boost = ?,
@@ -4131,7 +4289,9 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		server_timezone = ?,
 		conductor_time = ?,
 		backup_time = ?,
-		display_timezones = ?
+		display_timezones = ?,
+		vs_points_daily_target = ?,
+		vs_points_weekly_target = ?
 		WHERE id = 1`,
 		settings.AllianceName,
 		settings.AllianceShortName,
@@ -4150,6 +4310,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.ConductorTime,
 		settings.BackupTime,
 		settings.DisplayTimezones,
+		settings.VSPointsDailyTarget,
+		settings.VSPointsWeeklyTarget,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -6995,6 +7157,7 @@ func main() {
 	router.HandleFunc("/api/vs-points", authMiddleware(saveVSPoints)).Methods("POST")
 	router.HandleFunc("/api/vs-points/{week}", authMiddleware(deleteWeekVSPoints)).Methods("DELETE")
 	router.HandleFunc("/api/vs-points/process-screenshot", authMiddleware(processVSPointsScreenshot)).Methods("POST")
+	router.HandleFunc("/api/vs-compliance", authMiddleware(getVSCompliance)).Methods("GET")
 
 	// Recommendations routes (protected)
 	router.HandleFunc("/api/recommendations", authMiddleware(getRecommendations)).Methods("GET")

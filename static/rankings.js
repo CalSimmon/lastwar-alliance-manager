@@ -304,7 +304,7 @@ function buildDetailContent(r) {
         <div class="rk-detail-section rk-timeline-section">
             <h5>📊 Timeline — Last 3 Months <span class="rk-trend" id="trend-${r.member.id}"></span></h5>
             <div class="rk-timeline-controls">
-                <label><input type="checkbox" class="timeline-opt" id="show-reset-${r.member.id}" data-member-id="${r.member.id}" checked> With resets</label>
+                <label><input type="checkbox" class="timeline-opt" id="show-reset-${r.member.id}" data-member-id="${r.member.id}" checked> Points</label>
                 <label><input type="checkbox" class="timeline-opt" id="show-vs-${r.member.id}" data-member-id="${r.member.id}" checked> VS Points</label>
                 <label><input type="checkbox" class="timeline-opt" id="show-power-${r.member.id}" data-member-id="${r.member.id}"> Power</label>
                 <button class="rk-advanced-btn" onclick="toggleAdvanced(${r.member.id}, this)">More ▸</button>
@@ -317,6 +317,7 @@ function buildDetailContent(r) {
             </div>
             <div class="timeline-loading" id="timeline-loading-${r.member.id}"><p>Loading timeline...</p></div>
             <canvas id="timeline-${r.member.id}" class="member-timeline-canvas" style="display:none"></canvas>
+            <canvas id="vs-timeline-${r.member.id}" class="rk-power-canvas" style="display:none"></canvas>
             <canvas id="power-timeline-${r.member.id}" class="rk-power-canvas" style="display:none"></canvas>
         </div>`;
 
@@ -515,8 +516,9 @@ function computeTrend(values) {
 
 function buildMemberChart(ranking, timelineData) {
     const memberData = timelineData[ranking.member.id];
-    const loadingEl  = document.getElementById(`timeline-loading-${ranking.member.id}`);
-    const canvas     = document.getElementById(`timeline-${ranking.member.id}`);
+    const loadingEl   = document.getElementById(`timeline-loading-${ranking.member.id}`);
+    const canvas      = document.getElementById(`timeline-${ranking.member.id}`);
+    const vsCanvas    = document.getElementById(`vs-timeline-${ranking.member.id}`);
     const powerCanvas = document.getElementById(`power-timeline-${ranking.member.id}`);
 
     if (!memberData || memberData.dates.length === 0) {
@@ -529,7 +531,7 @@ function buildMemberChart(ranking, timelineData) {
     canvas.style.display = '';
 
     // Destroy previous instances
-    [canvas, powerCanvas].forEach(c => {
+    [canvas, vsCanvas, powerCanvas].forEach(c => {
         if (!c) return;
         const existing = Chart.getChart(c);
         if (existing) existing.destroy();
@@ -589,20 +591,6 @@ function buildMemberChart(ranking, timelineData) {
         }
     }
 
-    const hasVSData = memberData.vs_weekly_total && memberData.vs_weekly_total.some(v => v > 0);
-    if (showVS && hasVSData) {
-        datasets.push({
-            label: 'VS Points',
-            data: memberData.vs_weekly_total,
-            type: 'bar',
-            backgroundColor: 'rgba(155, 111, 204, 0.30)',
-            borderColor: '#9b6fcc',
-            borderWidth: 1,
-            yAxisID: 'yVS',
-            order: 10,
-        });
-    }
-
     if (datasets.length) {
         // Conductor annotations
         const annotations = {};
@@ -616,19 +604,6 @@ function buildMemberChart(ranking, timelineData) {
                 };
             }
         });
-
-        const scales = {
-            x: { title: { display: false }, ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } }, stacked: showBreakdown },
-            y: { type: scaleType, beginAtZero: true, position: 'left', title: { display: true, text: 'Points', font: { size: 11 } }, ticks: { font: { size: 10 } }, stacked: showBreakdown },
-        };
-        if (showVS && hasVSData) {
-            scales.yVS = {
-                type: 'linear', position: 'right', beginAtZero: true,
-                title: { display: true, text: 'VS', font: { size: 11 } },
-                ticks: { font: { size: 10 }, callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v },
-                grid: { drawOnChartArea: false },
-            };
-        }
 
         const chart = new Chart(canvas, {
             type: 'line',
@@ -645,19 +620,84 @@ function buildMemberChart(ranking, timelineData) {
                             label: item => {
                                 const v = item.parsed.y;
                                 if (v === null || v === undefined || v === 0) return null;
-                                const name = item.dataset.label;
-                                if (name === 'VS Points') return ` VS: ${v.toLocaleString()}`;
-                                return ` ${name}: ${v > 0 ? '+' : ''}${v}`;
+                                return ` ${item.dataset.label}: ${v > 0 ? '+' : ''}${v}`;
                             }
                         }
                     },
                     annotation: { annotations }
                 },
-                scales,
+                scales: {
+                    x: { title: { display: false }, ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } }, stacked: showBreakdown },
+                    y: { type: scaleType, beginAtZero: true, position: 'left', title: { display: true, text: 'Points', font: { size: 11 } }, ticks: { font: { size: 10 } }, stacked: showBreakdown },
+                },
                 interaction: { mode: 'nearest', axis: 'x', intersect: false }
             }
         });
         memberTimelineCharts.push(chart);
+    }
+
+    // ── VS mini-chart ─────────────────────────────────────────────────────────
+    if (vsCanvas) {
+        const hasVS = memberData.vs_weekly_total && memberData.vs_weekly_total.some(v => v > 0);
+        if (showVS && hasVS) {
+            vsCanvas.style.display = '';
+            const vsTarget = currentData?.settings?.vs_points_weekly_target || 0;
+            const vsAnnotations = {};
+            if (vsTarget > 0) {
+                vsAnnotations.target = {
+                    type: 'line', yMin: vsTarget, yMax: vsTarget,
+                    borderColor: 'rgba(239,68,68,0.7)', borderWidth: 1.5, borderDash: [4, 4],
+                    label: { display: true, content: `Target: ${vsTarget.toLocaleString()}`, position: 'end', font: { size: 10 } }
+                };
+            }
+            const vsChart = new Chart(vsCanvas, {
+                type: 'bar',
+                data: {
+                    labels: memberData.dates,
+                    datasets: [{
+                        label: 'VS Points',
+                        data: memberData.vs_weekly_total,
+                        backgroundColor: memberData.vs_weekly_total.map(v =>
+                            vsTarget > 0
+                                ? (v >= vsTarget ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.45)')
+                                : 'rgba(155,111,204,0.55)'
+                        ),
+                        borderColor: memberData.vs_weekly_total.map(v =>
+                            vsTarget > 0
+                                ? (v >= vsTarget ? '#22c55e' : '#ef4444')
+                                : '#9b6fcc'
+                        ),
+                        borderWidth: 1,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: items => items[0]?.label || '',
+                                label: item => ` VS: ${item.parsed.y.toLocaleString()}${vsTarget > 0 ? ' / ' + vsTarget.toLocaleString() + ' target' : ''}`
+                            }
+                        },
+                        annotation: { annotations: vsAnnotations }
+                    },
+                    scales: {
+                        x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } } },
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'VS Pts', font: { size: 11 } },
+                            ticks: { font: { size: 10 }, callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v }
+                        }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+            memberTimelineCharts.push(vsChart);
+        } else {
+            vsCanvas.style.display = 'none';
+        }
     }
 
     // ── Power mini-chart ──────────────────────────────────────────────────────

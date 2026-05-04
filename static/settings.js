@@ -126,6 +126,10 @@ async function loadSettings() {
         renderTimezoneTags();
         updateTimePreview();
         
+        // VS targets
+        document.getElementById('vs-daily-target').value = settings.vs_points_daily_target || 0;
+        document.getElementById('vs-weekly-target').value = settings.vs_points_weekly_target || 0;
+
         // Power tracking
         const powerTrackingEnabled = settings.power_tracking_enabled || false;
         document.getElementById('power-tracking-enabled').checked = powerTrackingEnabled;
@@ -157,6 +161,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         first_time_conductor_boost: parseInt(document.getElementById('first-time-boost').value),
         schedule_message_template: document.getElementById('schedule-message-template').value,
         daily_message_template: document.getElementById('daily-message-template').value,
+        vs_points_daily_target: parseInt(document.getElementById('vs-daily-target').value) || 0,
+        vs_points_weekly_target: parseInt(document.getElementById('vs-weekly-target').value) || 0,
         power_tracking_enabled: document.getElementById('power-tracking-enabled').checked,
         server_timezone: document.getElementById('server-timezone').value,
         conductor_time: document.getElementById('conductor-time').value,
@@ -204,6 +210,8 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
         currentTimezones = ['Europe/London'];
         renderTimezoneTags();
         updateTimePreview();
+        document.getElementById('vs-daily-target').value = 0;
+        document.getElementById('vs-weekly-target').value = 0;
         document.getElementById('power-tracking-enabled').checked = false;
     }
 });

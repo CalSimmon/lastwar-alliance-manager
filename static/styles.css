@@ -7796,6 +7796,240 @@ section:last-child {
 }
 
 /* ========================================
+   VS COMPLIANCE PAGE  (vc-* namespace)
+   ======================================== */
+
+.vc-target-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.65rem 1rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.vc-target-item strong { color: var(--text-primary); }
+
+.vc-sep { opacity: 0.4; }
+
+.vc-settings-link {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.vc-settings-link:hover { text-decoration: underline; }
+
+/* ── Week tabs ────────────────────────────────────────────────────────────── */
+.vc-week-tabs {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.vc-tab {
+    padding: 6px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    background: var(--container-bg);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.vc-tab:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.vc-tab.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+}
+
+/* ── Summary row ──────────────────────────────────────────────────────────── */
+.vc-summary-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.vc-summary-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    text-align: center;
+    border-top-width: 3px;
+}
+
+.vc-card-ok   { border-top-color: var(--bs-success, #22c55e); }
+.vc-card-warn { border-top-color: var(--bs-warning, #f59e0b); }
+.vc-card-miss { border-top-color: var(--danger, #ef4444); }
+.vc-card-none { border-top-color: var(--border-color); }
+
+.vc-summary-num {
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.vc-summary-lbl {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* ── Compliance grid ──────────────────────────────────────────────────────── */
+.vc-grid-section { }
+
+.vc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.75rem;
+}
+
+.vc-member-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-left-width: 4px;
+    border-radius: 8px;
+    padding: 0.85rem 0.9rem;
+    transition: box-shadow 0.15s;
+}
+
+.vc-member-card:hover { box-shadow: 0 2px 10px var(--shadow-md); }
+
+.vc-member-card.vc-card-ok   { border-left-color: var(--bs-success, #22c55e); }
+.vc-member-card.vc-card-warn { border-left-color: var(--bs-warning, #f59e0b); }
+.vc-member-card.vc-card-miss { border-left-color: var(--danger, #ef4444); }
+.vc-member-card.vc-card-none { border-left-color: var(--text-muted); }
+
+.vc-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.vc-member-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Status badges ────────────────────────────────────────────────────────── */
+.vc-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.vc-badge-ok   { background: rgba(34,197,94,0.15);  color: var(--bs-success, #22c55e); }
+.vc-badge-miss { background: rgba(239,68,68,0.12);  color: var(--danger, #ef4444); }
+.vc-badge-warn { background: rgba(245,158,11,0.15); color: var(--bs-warning, #f59e0b); }
+.vc-badge-none { background: var(--border-color);   color: var(--text-muted); }
+
+/* ── Daily dots ───────────────────────────────────────────────────────────── */
+.vc-days-row,
+.vc-dots-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 3px;
+    margin-bottom: 3px;
+}
+
+.vc-day-label {
+    text-align: center;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.vc-dot {
+    display: block;
+    height: 10px;
+    border-radius: 3px;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 28px;
+    cursor: default;
+    transition: opacity 0.15s;
+}
+
+.vc-dot-ok     { background: var(--bs-success, #22c55e); }
+.vc-dot-warn   { background: var(--bs-warning, #f59e0b); }
+.vc-dot-miss   { background: rgba(239,68,68,0.4); }
+.vc-dot-future { background: var(--border-color); opacity: 0.5; }
+
+/* ── Weekly progress bar ──────────────────────────────────────────────────── */
+.vc-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.vc-progress-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.vc-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.vc-bar-fill-ok   { background: var(--bs-success, #22c55e); }
+.vc-bar-fill-miss { background: var(--danger, #ef4444); }
+
+.vc-progress-pct {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 30px;
+    text-align: right;
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .vc-summary-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .vc-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ========================================
    REDUCED MOTION ACCESSIBILITY
    ======================================== */
 @media (prefers-reduced-motion: reduce) {

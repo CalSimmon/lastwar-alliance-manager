@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VS Compliance - Last War Alliance</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="branding.js"></script>
+    <script src="toast.js"></script>
+    <script src="navigation.js"></script>
+</head>
+<body data-h1="⚔️ Last War: Survival" data-subtitle="VS Points — who's carrying their weight.">
+    <div class="container">
+        <main>
+
+            <!-- ── Target banner ──────────────────────────────── -->
+            <div id="target-banner" class="vc-target-banner">
+                <span class="vc-target-item">Daily target: <strong id="daily-target-val">—</strong></span>
+                <span class="vc-sep">·</span>
+                <span class="vc-target-item">Weekly target: <strong id="weekly-target-val">—</strong></span>
+                <a href="/settings.html" class="vc-settings-link">⚙️ Configure</a>
+            </div>
+
+            <!-- ── Week tabs ──────────────────────────────────── -->
+            <div class="vc-week-tabs" id="week-tabs">
+                <div class="loading">⚔️ Loading compliance data...</div>
+            </div>
+
+            <!-- ── Current week summary cards ─────────────────── -->
+            <div class="vc-summary-row" id="summary-cards">
+                <div class="vc-summary-card vc-card-ok">
+                    <div class="vc-summary-num" id="count-ok">—</div>
+                    <div class="vc-summary-lbl">Met weekly target</div>
+                </div>
+                <div class="vc-summary-card vc-card-warn">
+                    <div class="vc-summary-num" id="count-partial">—</div>
+                    <div class="vc-summary-lbl">Partial / no target set</div>
+                </div>
+                <div class="vc-summary-card vc-card-miss">
+                    <div class="vc-summary-num" id="count-miss">—</div>
+                    <div class="vc-summary-lbl">Missed weekly target</div>
+                </div>
+                <div class="vc-summary-card vc-card-none">
+                    <div class="vc-summary-num" id="count-none">—</div>
+                    <div class="vc-summary-lbl">No data submitted</div>
+                </div>
+            </div>
+
+            <!-- ── Compliance grid ────────────────────────────── -->
+            <section class="vc-grid-section">
+                <div id="compliance-grid" class="vc-grid">
+                    <div class="loading">⚔️ Loading...</div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="vs-compliance.js"></script>
+</body>
+</html>

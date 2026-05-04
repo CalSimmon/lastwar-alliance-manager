@@ -51,6 +51,7 @@
                 <a href="/rankings.html" class="nav-link">📊 Rankings</a>
                 <a href="/storm.html" class="nav-link">🏜️ Storm</a>
                 <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
+                <a href="/vs-compliance.html" class="nav-link">📋 VS Compliance</a>
                 <a href="/upload.html" class="nav-link">📸 Upload</a>
                 <a href="/settings.html" class="nav-link">⚙️ Settings</a>
                 <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
