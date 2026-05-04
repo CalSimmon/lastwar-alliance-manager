@@ -302,10 +302,11 @@ function buildDetailContent(r) {
     // Timeline
     const timelineHtml = `
         <div class="rk-detail-section rk-timeline-section">
-            <h5>📊 Timeline — Last 3 Months</h5>
+            <h5>📊 Timeline — Last 3 Months <span class="rk-trend" id="trend-${r.member.id}"></span></h5>
             <div class="rk-timeline-controls">
                 <label><input type="checkbox" class="timeline-opt" id="show-reset-${r.member.id}" data-member-id="${r.member.id}" checked> With resets</label>
-                <label><input type="checkbox" class="timeline-opt" id="show-power-${r.member.id}" data-member-id="${r.member.id}" checked> Power</label>
+                <label><input type="checkbox" class="timeline-opt" id="show-vs-${r.member.id}" data-member-id="${r.member.id}" checked> VS Points</label>
+                <label><input type="checkbox" class="timeline-opt" id="show-power-${r.member.id}" data-member-id="${r.member.id}"> Power</label>
                 <button class="rk-advanced-btn" onclick="toggleAdvanced(${r.member.id}, this)">More ▸</button>
             </div>
             <div class="rk-timeline-advanced" id="advanced-${r.member.id}">
@@ -316,6 +317,7 @@ function buildDetailContent(r) {
             </div>
             <div class="timeline-loading" id="timeline-loading-${r.member.id}"><p>Loading timeline...</p></div>
             <canvas id="timeline-${r.member.id}" class="member-timeline-canvas" style="display:none"></canvas>
+            <canvas id="power-timeline-${r.member.id}" class="rk-power-canvas" style="display:none"></canvas>
         </div>`;
 
     return `
@@ -499,10 +501,23 @@ function rebuildSingleMemberChart(memberId) {
     if (ranking) buildMemberChart(ranking, cachedTimelineData);
 }
 
+function computeTrend(values) {
+    if (!values || values.length < 4) return 'flat';
+    const last4 = values.slice(-4);
+    const first2avg = (last4[0] + last4[1]) / 2;
+    const last2avg  = (last4[2] + last4[3]) / 2;
+    if (first2avg === 0 && last2avg === 0) return 'flat';
+    const pct = first2avg > 0 ? (last2avg - first2avg) / first2avg : (last2avg > 0 ? 1 : 0);
+    if (pct > 0.05) return 'up';
+    if (pct < -0.05) return 'down';
+    return 'flat';
+}
+
 function buildMemberChart(ranking, timelineData) {
     const memberData = timelineData[ranking.member.id];
-    const loadingEl = document.getElementById(`timeline-loading-${ranking.member.id}`);
-    const canvas = document.getElementById(`timeline-${ranking.member.id}`);
+    const loadingEl  = document.getElementById(`timeline-loading-${ranking.member.id}`);
+    const canvas     = document.getElementById(`timeline-${ranking.member.id}`);
+    const powerCanvas = document.getElementById(`power-timeline-${ranking.member.id}`);
 
     if (!memberData || memberData.dates.length === 0) {
         if (loadingEl) loadingEl.innerHTML = '<p class="empty">No timeline data available.</p>';
@@ -513,87 +528,189 @@ function buildMemberChart(ranking, timelineData) {
     if (loadingEl) loadingEl.style.display = 'none';
     canvas.style.display = '';
 
-    const existingChart = Chart.getChart(canvas);
-    if (existingChart) existingChart.destroy();
-    memberTimelineCharts = memberTimelineCharts.filter(c => c.canvas !== canvas);
+    // Destroy previous instances
+    [canvas, powerCanvas].forEach(c => {
+        if (!c) return;
+        const existing = Chart.getChart(c);
+        if (existing) existing.destroy();
+        memberTimelineCharts = memberTimelineCharts.filter(ch => ch.canvas !== c);
+    });
 
-    const showReset    = document.getElementById(`show-reset-${ranking.member.id}`)?.checked ?? true;
-    const showNoReset  = document.getElementById(`show-no-reset-${ranking.member.id}`)?.checked ?? true;
+    const showReset     = document.getElementById(`show-reset-${ranking.member.id}`)?.checked ?? true;
+    const showNoReset   = document.getElementById(`show-no-reset-${ranking.member.id}`)?.checked ?? true;
     const showBreakdown = document.getElementById(`show-breakdown-${ranking.member.id}`)?.checked ?? false;
-    const showPower    = document.getElementById(`show-power-${ranking.member.id}`)?.checked ?? true;
-    const scaleType    = document.querySelector(`input[name="scale-type-${ranking.member.id}"]:checked`)?.value || 'linear';
+    const showVS        = document.getElementById(`show-vs-${ranking.member.id}`)?.checked ?? true;
+    const showPower     = document.getElementById(`show-power-${ranking.member.id}`)?.checked ?? false;
+    const scaleType     = document.querySelector(`input[name="scale-type-${ranking.member.id}"]:checked`)?.value || 'linear';
 
     applyChartTheme();
+
+    // Trend indicator
+    const trendEl = document.getElementById(`trend-${ranking.member.id}`);
+    if (trendEl && memberData.points_with_reset) {
+        const trend = computeTrend(memberData.points_with_reset);
+        trendEl.className = `rk-trend rk-trend-${trend}`;
+        const labels = { up: '↗ Trending up', down: '↘ Trending down', flat: '→ Stable' };
+        trendEl.textContent = labels[trend] || '';
+        trendEl.title = 'Based on last 4 weeks';
+    }
+
+    // ── Points + VS chart ─────────────────────────────────────────────────────
     const datasets = [];
+    const accentColor = getCSSColor('--accent-primary');
+    const infoColor   = getCSSColor('--bs-info') || '#17a2b8';
 
     if (showBreakdown) {
         const addStack = (label, data, color, stack) => {
             if (!data) return;
-            datasets.push({ label, data, backgroundColor: color + '99', borderColor: color, borderWidth: 1, fill: true, stack, yAxisID: 'y' });
+            datasets.push({ label, data, backgroundColor: color + '99', borderColor: color, borderWidth: 1, fill: true, stack, yAxisID: 'y', type: 'bar' });
         };
         const colors = { awards: '#ffd700', recs: '#17a2b8', boost: '#9b6fcc', first: '#3b82f6', penalty: '#ef4444', above: '#f59e0b' };
         if (showReset) {
-            addStack('Awards',          memberData.awards_with_reset,              colors.awards,   'reset');
-            addStack('Recs',            memberData.recommendations_with_reset,     colors.recs,     'reset');
-            addStack('Rank Boost',      memberData.rank_boost_with_reset,          colors.boost,    'reset');
-            addStack('First Timer',     memberData.first_time_boost_with_reset,    colors.first,    'reset');
-            addStack('Recent Penalty',  (memberData.recent_penalty_with_reset || []).map(v => -v),  colors.penalty, 'reset');
-            addStack('Above Avg',       (memberData.above_avg_penalty_with_reset || []).map(v => -v), colors.above, 'reset');
+            addStack('Awards',         memberData.awards_with_reset,              colors.awards,   'reset');
+            addStack('Recs',           memberData.recommendations_with_reset,     colors.recs,     'reset');
+            addStack('Rank Boost',     memberData.rank_boost_with_reset,          colors.boost,    'reset');
+            addStack('First Timer',    memberData.first_time_boost_with_reset,    colors.first,    'reset');
+            addStack('Recent Penalty', (memberData.recent_penalty_with_reset || []).map(v => -v),  colors.penalty, 'reset');
+            addStack('Above Avg',      (memberData.above_avg_penalty_with_reset || []).map(v => -v), colors.above, 'reset');
         }
         if (showNoReset) {
-            addStack('Awards (Cum)',    memberData.awards_cumulative,              colors.awards + '88', 'cumul');
-            addStack('Recs (Cum)',      memberData.recommendations_cumulative,     colors.recs   + '88', 'cumul');
-            addStack('Boost (Cum)',     memberData.rank_boost_cumulative,          colors.boost  + '88', 'cumul');
-            addStack('First (Cum)',     memberData.first_time_boost_cumulative,    colors.first  + '88', 'cumul');
+            addStack('Awards (Cum)',   memberData.awards_cumulative,              colors.awards + '88', 'cumul');
+            addStack('Recs (Cum)',     memberData.recommendations_cumulative,     colors.recs   + '88', 'cumul');
+            addStack('Boost (Cum)',    memberData.rank_boost_cumulative,          colors.boost  + '88', 'cumul');
+            addStack('First (Cum)',    memberData.first_time_boost_cumulative,    colors.first  + '88', 'cumul');
         }
     } else {
         if (showReset && memberData.points_with_reset) {
-            datasets.push({ label: 'With Resets', data: memberData.points_with_reset, borderColor: getCSSColor('--accent-primary'), backgroundColor: getCSSColor('--accent-primary') + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y' });
+            datasets.push({ label: 'With Resets', data: memberData.points_with_reset, borderColor: accentColor, backgroundColor: accentColor + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y', type: 'line' });
         }
         if (showNoReset && memberData.points_cumulative) {
-            datasets.push({ label: 'Cumulative', data: memberData.points_cumulative, borderColor: getCSSColor('--bs-info') || '#17a2b8', backgroundColor: (getCSSColor('--bs-info') || '#17a2b8') + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y' });
+            datasets.push({ label: 'Cumulative', data: memberData.points_cumulative, borderColor: infoColor, backgroundColor: infoColor + '22', borderWidth: 2, fill: true, tension: 0.2, yAxisID: 'y', type: 'line' });
         }
     }
 
-    if (showPower && memberData.power) {
-        datasets.push({ label: 'Power', data: memberData.power, borderColor: getCSSColor('--accent-primary'), backgroundColor: 'transparent', borderWidth: 2, fill: false, tension: 0.2, yAxisID: 'y1' });
+    const hasVSData = memberData.vs_weekly_total && memberData.vs_weekly_total.some(v => v > 0);
+    if (showVS && hasVSData) {
+        datasets.push({
+            label: 'VS Points',
+            data: memberData.vs_weekly_total,
+            type: 'bar',
+            backgroundColor: 'rgba(155, 111, 204, 0.30)',
+            borderColor: '#9b6fcc',
+            borderWidth: 1,
+            yAxisID: 'yVS',
+            order: 10,
+        });
     }
 
-    if (!datasets.length) return;
+    if (datasets.length) {
+        // Conductor annotations
+        const annotations = {};
+        (memberData.conductor_dates || []).forEach((d, idx) => {
+            const wi = memberData.dates.indexOf(d);
+            if (wi !== -1) {
+                annotations[`c-${idx}`] = {
+                    type: 'line', xMin: wi, xMax: wi,
+                    borderColor: 'rgba(255,159,64,0.8)', borderWidth: 2, borderDash: [5, 5],
+                    label: { display: true, content: '🚂', position: 'start', yAdjust: -10, font: { size: 13 } }
+                };
+            }
+        });
 
-    // Conductor-date annotations
-    const annotations = {};
-    (memberData.conductor_dates || []).forEach((d, idx) => {
-        const wi = memberData.dates.indexOf(d);
-        if (wi !== -1) {
-            annotations[`c-${idx}`] = {
-                type: 'line', xMin: wi, xMax: wi,
-                borderColor: 'rgba(255,159,64,0.8)', borderWidth: 2, borderDash: [5,5],
-                label: { display: true, content: '🚂', position: 'start', yAdjust: -10, font: { size: 13 } }
+        const scales = {
+            x: { title: { display: false }, ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } }, stacked: showBreakdown },
+            y: { type: scaleType, beginAtZero: true, position: 'left', title: { display: true, text: 'Points', font: { size: 11 } }, ticks: { font: { size: 10 } }, stacked: showBreakdown },
+        };
+        if (showVS && hasVSData) {
+            scales.yVS = {
+                type: 'linear', position: 'right', beginAtZero: true,
+                title: { display: true, text: 'VS', font: { size: 11 } },
+                ticks: { font: { size: 10 }, callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v },
+                grid: { drawOnChartArea: false },
             };
         }
-    });
 
-    const chart = new Chart(canvas, {
-        type: 'line',
-        data: { labels: memberData.dates, datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { display: true, position: 'top', labels: { font: { size: 11 } } },
-                tooltip: { mode: 'index', intersect: false },
-                annotation: { annotations }
-            },
-            scales: {
-                x: { title: { display: true, text: 'Week', font: { size: 11 } }, ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } }, stacked: showBreakdown },
-                y: { type: scaleType, beginAtZero: true, position: 'left', title: { display: true, text: 'Points', font: { size: 11 } }, ticks: { font: { size: 10 } }, stacked: showBreakdown },
-                y1: { type: 'linear', position: 'right', beginAtZero: false, title: { display: true, text: 'Power', font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => formatPowerShort(v) }, grid: { drawOnChartArea: false } }
-            },
-            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        const chart = new Chart(canvas, {
+            type: 'line',
+            data: { labels: memberData.dates, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12 } },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: item => {
+                                const v = item.parsed.y;
+                                if (v === null || v === undefined || v === 0) return null;
+                                const name = item.dataset.label;
+                                if (name === 'VS Points') return ` VS: ${v.toLocaleString()}`;
+                                return ` ${name}: ${v > 0 ? '+' : ''}${v}`;
+                            }
+                        }
+                    },
+                    annotation: { annotations }
+                },
+                scales,
+                interaction: { mode: 'nearest', axis: 'x', intersect: false }
+            }
+        });
+        memberTimelineCharts.push(chart);
+    }
+
+    // ── Power mini-chart ──────────────────────────────────────────────────────
+    if (powerCanvas) {
+        const hasPower = memberData.power && memberData.power.some(v => v > 0);
+        if (showPower && hasPower) {
+            powerCanvas.style.display = '';
+            const powerChart = new Chart(powerCanvas, {
+                type: 'line',
+                data: {
+                    labels: memberData.dates,
+                    datasets: [{
+                        label: 'Power',
+                        data: memberData.power,
+                        borderColor: accentColor,
+                        backgroundColor: accentColor + '22',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                title: items => items[0]?.label || '',
+                                label: item => ` Power: ${formatPowerShort(item.parsed.y)}`
+                            }
+                        },
+                        annotation: { annotations: {} }
+                    },
+                    scales: {
+                        x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } } },
+                        y: {
+                            beginAtZero: false,
+                            title: { display: true, text: 'Power', font: { size: 11 } },
+                            ticks: { font: { size: 10 }, callback: v => formatPowerShort(v) }
+                        }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+            memberTimelineCharts.push(powerChart);
+        } else {
+            powerCanvas.style.display = 'none';
         }
-    });
-    memberTimelineCharts.push(chart);
+    }
 }
 
 // ── CSV export ────────────────────────────────────────────────────────────────

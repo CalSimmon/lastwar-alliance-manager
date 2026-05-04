@@ -7692,8 +7692,26 @@ section:last-child {
 }
 
 .member-timeline-canvas {
-    max-height: 220px;
+    max-height: 280px;
 }
+
+.rk-power-canvas {
+    max-height: 110px;
+    margin-top: 0.6rem;
+    opacity: 0.85;
+}
+
+/* ── Trend indicator ─────────────────────────────────────────────────────── */
+.rk-trend {
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+}
+
+.rk-trend-up   { color: var(--bs-success, #22c55e); }
+.rk-trend-down { color: var(--danger, #ef4444); }
+.rk-trend-flat { color: var(--text-muted); }
 
 /* ── Last-run cell colors ─────────────────────────────────────────────────── */
 .rk-last-never  { color: var(--text-muted); font-style: italic; }

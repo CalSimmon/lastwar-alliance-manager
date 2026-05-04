@@ -4524,9 +4524,9 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 		// Get power history for this member
 		powerHistoryMap := make(map[string]int)
 		powerRows, err := db.Query(`
-			SELECT DATE(recorded_at) as power_date, 
+			SELECT DATE(recorded_at) as power_date,
 			       MAX(power) as max_power
-			FROM power_history 
+			FROM power_history
 			WHERE member_id = ? AND DATE(recorded_at) >= ?
 			GROUP BY DATE(recorded_at)
 			ORDER BY power_date ASC
@@ -4540,6 +4540,27 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			powerRows.Close()
+		}
+
+		// Get VS points for this member (weekly totals keyed by Monday date)
+		vsWeekMap := make(map[string]int)
+		vsRows, err := db.Query(`
+			SELECT week_date,
+			       COALESCE(monday,0) + COALESCE(tuesday,0) + COALESCE(wednesday,0) +
+			       COALESCE(thursday,0) + COALESCE(friday,0) + COALESCE(saturday,0) as weekly_total
+			FROM vs_points
+			WHERE member_id = ? AND week_date >= ?
+			ORDER BY week_date ASC
+		`, member.ID, formatDateString(startDate))
+		if err == nil {
+			for vsRows.Next() {
+				var weekDate string
+				var total int
+				if err := vsRows.Scan(&weekDate, &total); err == nil {
+					vsWeekMap[weekDate] = total
+				}
+			}
+			vsRows.Close()
 		}
 
 		// Build weekly timeline arrays
@@ -4560,6 +4581,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 		aboveAvgPenaltyCumulative := []int{}
 		powerValues := []int{}
 		lastKnownPower := 0
+		vsWeeklyTotals := []int{}
 
 		currentPoints := 0
 		cumulativePoints := 0
@@ -4720,6 +4742,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 			aboveAvgPenaltyWithReset = append(aboveAvgPenaltyWithReset, currentAboveAvgPenalty)
 			aboveAvgPenaltyCumulative = append(aboveAvgPenaltyCumulative, cumulativeAboveAvgPenalty)
 			powerValues = append(powerValues, weekMaxPower)
+			vsWeeklyTotals = append(vsWeeklyTotals, vsWeekMap[weekStartStr])
 
 			currentDate = currentDate.AddDate(0, 0, 7)
 		}
@@ -4755,6 +4778,7 @@ func getMemberTimelines(w http.ResponseWriter, r *http.Request) {
 			"above_avg_penalty_cumulative": aboveAvgPenaltyCumulative,
 			"conductor_dates":              conductorWeekLabels,
 			"power":                        powerValues,
+			"vs_weekly_total":              vsWeeklyTotals,
 		}
 	}
 
