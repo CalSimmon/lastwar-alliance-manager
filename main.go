@@ -2658,7 +2658,7 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 			ts.id, ts.date, ts.conductor_id,
 			COALESCE(m1.name, ts.conductor_name_snapshot, '[Removed Member]') as conductor_name,
 			ts.conductor_score,
-			ts.backup_id,
+			COALESCE(ts.backup_id, 0) as backup_id,
 			COALESCE(m2.name, ts.backup_name_snapshot, '') as backup_name,
 			COALESCE(m2.rank, '') as backup_rank,
 			ts.conductor_showed_up, ts.actual_conductor_id,
@@ -2790,7 +2790,8 @@ func updateTrainSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get existing schedule to check if conductor or backup changed
-	var existingConductorID, existingBackupID int
+	var existingConductorID int
+	var existingBackupID sql.NullInt64
 	err = db.QueryRow("SELECT conductor_id, backup_id FROM train_schedules WHERE id = ?", id).Scan(&existingConductorID, &existingBackupID)
 	if err != nil {
 		http.Error(w, "Schedule not found", http.StatusNotFound)
