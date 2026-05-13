@@ -6558,29 +6558,6 @@ section:last-child {
     transform: none;
 }
 
-.default-creds {
-    margin-top: 20px;
-    padding: 15px;
-    background: var(--info-light);
-    border-radius: var(--radius-md);
-    font-size: 0.9em;
-    color: var(--info-dark);
-    border: 1px solid var(--info);
-}
-
-.default-creds strong {
-    display: block;
-    margin-bottom: 8px;
-    font-size: 1.1em;
-}
-
-.default-creds code {
-    background: var(--container-bg);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: monospace;
-}
-
 @media (max-width: 768px) {
     .login-container {
         margin: 50px auto 20px;
