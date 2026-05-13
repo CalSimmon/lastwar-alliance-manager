@@ -2,6 +2,16 @@
 
 A comprehensive Go web application for managing your alliance in the online game Last War: Survival. Track members, manage train schedules, award achievements, and generate communication messages.
 
+## Screenshots
+
+| Members | Train Schedule |
+|---|---|
+| ![Members](docs/screenshots/members.png) | ![Train Schedule](docs/screenshots/train-schedule.png) |
+
+| Rankings | Member Detail |
+|---|---|
+| ![Rankings](docs/screenshots/rankings.png) | ![Member Detail](docs/screenshots/member-detail.png) |
+
 ## Features
 
 ### Core Management
