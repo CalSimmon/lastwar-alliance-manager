@@ -59,51 +59,92 @@ See [IMAGE_RECOGNITION.md](IMAGE_RECOGNITION.md) for detailed technical document
 
 ## Prerequisites
 
-### Development
-- **Go 1.21 or higher** - Download from https://golang.org/dl/
-- **GCC compiler** (for CGO compilation - required for Tesseract OCR):
-  - Windows: Install MinGW-w64 or TDM-GCC
+### Docker / Podman (Recommended)
+The easiest way to run the application — no Go, GCC, or Tesseract installation required.
+
+- **Docker** or **Podman** (with Compose support)
+
+### Building from Source
+- **Go 1.23 or higher** — https://golang.org/dl/
+- **GCC + G++** (for CGO/Tesseract):
+  - Windows: MinGW-w64 or TDM-GCC
   - Linux: `sudo apt-get install build-essential`
-  - macOS: Install Xcode Command Line Tools
-- **Tesseract OCR** (for image recognition features):
-  - Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+  - macOS: Xcode Command Line Tools
+- **Tesseract OCR**:
+  - Windows: https://github.com/UB-Mannheim/tesseract/wiki
   - Linux: `sudo apt-get install tesseract-ocr tesseract-ocr-all libtesseract-dev libleptonica-dev`
   - macOS: `brew install tesseract`
 
-**Note**: CGO must be enabled for OCR features (`go env CGO_ENABLED` should return `1`). On Windows without MinGW/TDM-GCC, the application can compile but OCR features won't work. Deploy to Linux for full functionality.
+**Note**: CGO must be enabled (`go env CGO_ENABLED` → `1`). Deploy to Linux for full OCR functionality.
 
 ### Production (Debian/Ubuntu Server)
-See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive production deployment guide with:
-- Automated installation script
-- Let's Encrypt SSL setup (Caddy or Nginx)
-- Security hardening
-- Systemd service configuration
-- Firewall and fail2ban setup
-- Automated backups
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the comprehensive production guide covering:
+- Docker Compose deployment (recommended)
+- Automated bare-metal installation script
+- Let's Encrypt SSL (Caddy or Nginx)
+- Security hardening, systemd, firewall, fail2ban, and automated backups
 
 ## Installation
 
-### Development Setup
+### Docker / Podman (Quickest)
 
-1. Navigate to the project directory
-2. Download dependencies:
+```bash
+# Clone or download the project, then:
+docker compose up -d          # Docker
+# -- or --
+podman-compose up -d          # Podman
+
+# The app is now running at http://localhost:8080
+# The SQLite database is persisted in ./data/alliance.db
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for full Docker production setup (with HTTPS reverse proxy).
+
+### Build from Source
+
+1. Navigate to the project directory and download dependencies:
+
 ```bash
 go mod download
 ```
 
-### Production Deployment
+2. Build and run:
 
-**Quick Install (Debian/Ubuntu):**
+```bash
+go build -o alliance-manager main.go
+./alliance-manager
+```
+
+### Bare-Metal Production (Debian/Ubuntu)
+
 ```bash
 chmod +x install.sh
-./install.sh
+sudo ./install.sh
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed manual setup instructions.
 
 ## Running the Application
 
-### Development Mode
+### Docker / Podman
+
+```bash
+# Start (detached)
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
+
+# Rebuild after code changes
+docker compose up -d --build
+```
+
+The database is stored in `./data/alliance.db` on the host.
+
+### Development (from source)
 
 Build and run the server:
 ```bash
@@ -116,16 +157,14 @@ go build -o alliance-manager
 ./alliance-manager
 ```
 
-The application will be available at `http://localhost:8080`
+The application will be available at `http://localhost:8080`.
 
-### Production Mode
+### Production (bare-metal)
 
 ```bash
 # Set environment variables
 export SESSION_KEY=$(openssl rand -hex 32)
 export DATABASE_PATH=/var/lib/lastwar/alliance.db
-export PRODUCTION=true
-export HTTPS=true
 
 # Build and run
 go build -o alliance-manager main.go
@@ -136,11 +175,12 @@ Or use the systemd service (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 ## Environment Variables
 
-- `DATABASE_PATH` - Path to SQLite database file (default: `./alliance.db`)
-- `SESSION_KEY` - 64-character hex string for session encryption (auto-generated if not set)
-- `PRODUCTION` - Set to `true` for production mode (enables secure cookies)
-- `HTTPS` - Set to `true` when using HTTPS (enables secure cookie flag)
-- `PORT` - Server port (default: `8080`)
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_PATH` | `./alliance.db` | Path to SQLite database file |
+| `SESSION_KEY` | *(auto-generated)* | 64-character hex string for session encryption. Set a stable value in production or sessions reset on restart. |
+| `PRODUCTION` | — | Set to `true` to enable secure cookies (requires HTTPS) |
+| `HTTPS` | — | Set to `true` when behind HTTPS to set the Secure cookie flag |
 
 ## Default Login Credentials
 
@@ -153,33 +193,37 @@ Or use the systemd service (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 ```
 LastWar/
-├── main.go             # Go server and API routes
-├── go.mod              # Go module dependencies
-├── Dockerfile          # Docker container configuration
-├── alliance.db         # SQLite database (created automatically)
-├── install.sh          # Automated Debian installation script
-├── lastwar.service     # Systemd service configuration
-├── Caddyfile           # Caddy reverse proxy configuration
-├── .env.example        # Environment variables example
-├── DEPLOYMENT.md       # Production deployment guide
-├── static/             # Frontend files
-│   ├── index.html      # Member management page
-│   ├── login.html      # Login page
-│   ├── profile.html    # User profile & password management
-│   ├── train.html      # Train schedule management
-│   ├── awards.html     # Awards tracking
-│   ├── recommendations.html  # Recommendation system
-│   ├── rankings.html   # Performance rankings
-│   ├── settings.html   # Configuration (R5/Admin only)
-│   ├── styles.css      # Styling
-│   ├── app.js          # Member management JS
-│   ├── profile.js      # Profile page JS
-│   ├── train.js        # Train schedule JS
-│   ├── awards.js       # Awards tracking JS
-│   ├── recommendations.js   # Recommendations JS
-│   ├── rankings.js     # Rankings display JS
-│   └── settings.js     # Settings configuration JS
-└── README.md           # This file
+├── main.go                  # Go server and all API routes
+├── go.mod / go.sum          # Go module dependencies
+├── Dockerfile               # Multi-stage container build
+├── docker-compose.yml       # Compose file (persists DB in ./data/)
+├── .env.example             # Environment variable reference
+├── install.sh               # Automated Debian/Ubuntu installation
+├── lastwar.service          # Systemd service unit file
+├── Caddyfile                # Caddy reverse-proxy configuration
+├── data/                    # SQLite database volume (Docker/local)
+│   └── alliance.db          # Created automatically on first run
+├── DEPLOYMENT.md            # Full production deployment guide
+├── QUICKSTART.md            # Fast-path setup reference
+├── IMAGE_RECOGNITION.md     # OCR system technical documentation
+└── static/                  # Frontend (HTML / CSS / JS)
+    ├── index.html           # Member management
+    ├── login.html           # Login page
+    ├── profile.html         # User profile & password management
+    ├── train.html           # Train schedule management
+    ├── awards.html          # Awards tracking
+    ├── recommendations.html # Recommendation system
+    ├── rankings.html        # Performance rankings
+    ├── settings.html        # Configuration (R5/Admin only)
+    ├── storm.html           # Storm assignments
+    ├── vs.html              # VS points tracking
+    ├── vs-compliance.html   # VS compliance report
+    ├── upload.html          # Screenshot upload (OCR)
+    ├── graveyard.html       # Deleted members archive
+    ├── conduct.html         # Conduct reports
+    ├── admin.html           # Admin panel
+    ├── styles.css           # Global styles
+    └── *.js                 # Page-specific JavaScript modules
 ```
 
 ## Ranks
@@ -211,10 +255,11 @@ LastWar/
 
 ## Technologies Used
 
-- **Backend**: Go, Gorilla Mux
-- **Database**: SQLite3 with go-sqlite3 driver
-- **Frontend**: Vanilla HTML/CSS/JavaScript
-- **Styling**: Modern gradient design with responsive layout
+- **Backend**: Go 1.23, Gorilla Mux, Gorilla Sessions
+- **Database**: SQLite (modernc.org/sqlite — pure Go, no CGO needed for DB)
+- **OCR**: Tesseract via gosseract (CGO — requires GCC/G++ and Tesseract at build time)
+- **Frontend**: Vanilla HTML / CSS / JavaScript
+- **Container**: Docker / Podman (multi-stage Alpine build)
 
 ## API Endpoints
 
@@ -258,18 +303,14 @@ LastWar/
 
 ## Notes
 
-- The database file `alliance.db` will be created automatically on first run
-- Make sure port 8080 is available (or set PORT environment variable)
+- The database is created automatically on first run (default: `./alliance.db`; Docker: `./data/alliance.db` on the host)
+- Port `8080` is used by default (not configurable via env — change in `main.go` if needed)
 - All data is stored locally in the SQLite database
-- Default admin user is created automatically on first run
-- Session cookies are used for authentication
-- Passwords are hashed using bcrypt for security
-- User creation generates secure random 10-character alphanumeric passwords
-- Auto-schedule uses a sophisticated ranking algorithm to ensure fair distribution
-- Message templates are fully customizable in the Settings page
-- Daily messages include specific times: 15:00 ST (17:00 UK) for conductor, 16:30 ST (18:30 UK) for backup
-- The application can be containerized using the provided Dockerfile
-- Set DATABASE_PATH environment variable for custom database location (useful for Docker volumes)
+- A default `admin` user is created on first run — **change the password immediately**
+- Passwords are hashed with bcrypt
+- Sessions use signed cookies via Gorilla Sessions; set `SESSION_KEY` to a stable hex value in production
+- The Docker image includes Tesseract and English language data — no host-side OCR setup needed
+- Set `DATABASE_PATH` to point to the mounted volume path when running in Docker
 
 ## How Auto-Schedule Works
 

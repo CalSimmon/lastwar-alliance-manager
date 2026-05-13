@@ -1,40 +1,43 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev sqlite-dev
+# Install build dependencies (gcc/g++/musl for CGO; tesseract-ocr-dev for gosseract)
+RUN apk add --no-cache gcc g++ musl-dev tesseract-ocr-dev leptonica-dev
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files and download dependencies first (layer cache)
 COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application with CGO enabled for gosseract/Tesseract
 RUN CGO_ENABLED=1 GOOS=linux go build -o main .
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3.21
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates sqlite-libs
+# Install runtime dependencies:
+#   ca-certificates  - HTTPS support
+#   tesseract-ocr    - Tesseract OCR engine (required by gosseract)
+#   tesseract-ocr-data-eng - English language data for OCR
+RUN apk add --no-cache ca-certificates tesseract-ocr tesseract-ocr-data-eng
 
 WORKDIR /app
 
-# Copy binary from builder
+# Copy binary and static assets from builder
 COPY --from=builder /app/main .
 COPY --from=builder /app/static ./static
 
-# Create data directory for SQLite database
+# Create data directory for the SQLite database (mounted as a volume)
 RUN mkdir -p /data
 
-# Expose port
+# Expose the application port
 EXPOSE 8080
 
-# Set environment variable for database location
+# Database stored on the mounted volume; SESSION_KEY should be set at runtime
 ENV DATABASE_PATH=/data/alliance.db
 
 # Run the application

@@ -1107,7 +1107,17 @@ func initDB() error {
 		above_average_conductor_penalty INTEGER NOT NULL DEFAULT 10,
 		r4r5_rank_boost INTEGER NOT NULL DEFAULT 5,
 		first_time_conductor_boost INTEGER NOT NULL DEFAULT 5,
-		schedule_message_template TEXT NOT NULL DEFAULT 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}'
+		schedule_message_template TEXT NOT NULL DEFAULT 'Train Schedule - Week {WEEK}\n\n{SCHEDULES}\n\nNext in line:\n{NEXT_3}',
+		daily_message_template TEXT,
+		power_tracking_enabled BOOLEAN DEFAULT 0,
+		server_timezone TEXT NOT NULL DEFAULT 'UTC',
+		conductor_time TEXT NOT NULL DEFAULT '15:00',
+		backup_time TEXT NOT NULL DEFAULT '16:30',
+		display_timezones TEXT NOT NULL DEFAULT '["Europe/London"]',
+		alliance_name TEXT NOT NULL DEFAULT 'Last War: Survival',
+		alliance_short_name TEXT NOT NULL DEFAULT 'LWS',
+		vs_points_daily_target INTEGER NOT NULL DEFAULT 0,
+		vs_points_weekly_target INTEGER NOT NULL DEFAULT 0
 	);`
 
 	_, err = db.Exec(createSettingsSQL)

@@ -1,6 +1,49 @@
 # Quick Production Setup Guide
 
-## One-Command Installation (Debian/Ubuntu)
+## Option 1: Docker / Podman (Fastest — Recommended)
+
+No Go, GCC, or Tesseract needed on the host.
+
+### 1. Generate a Session Key
+```bash
+openssl rand -hex 32
+```
+
+### 2. Set the Session Key
+Edit `docker-compose.yml` and paste the key into the `SESSION_KEY` environment variable.
+
+### 3. Start
+```bash
+# Docker
+docker compose up -d
+
+# Podman
+podman-compose up -d
+```
+
+The app is running at `http://localhost:8080`.  
+The database is stored in `./data/alliance.db` on the host.
+
+### 4. Add HTTPS (Caddy)
+```bash
+sudo apt install -y caddy
+echo 'your-domain.com { reverse_proxy localhost:8080 }' | sudo tee /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+### Useful Commands
+```bash
+docker compose logs -f            # Tail logs
+docker compose restart            # Restart
+docker compose up -d --build      # Rebuild after code change
+docker compose down               # Stop and remove containers
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for full Docker production setup.
+
+---
+
+## Option 2: One-Command Bare-Metal Installation (Debian/Ubuntu)
 
 ```bash
 chmod +x install.sh
@@ -8,7 +51,7 @@ sudo ./install.sh
 ```
 
 The script will:
-- ✅ Install Go and dependencies
+- ✅ Install Go and build dependencies (gcc, g++, tesseract)
 - ✅ Create system user and directories
 - ✅ Build the application
 - ✅ Generate secure session key
@@ -19,7 +62,7 @@ The script will:
 - ✅ Setup fail2ban
 - ✅ Configure daily backups
 
-## Manual Quick Start
+## Manual Quick Start (Bare-Metal)
 
 ### 1. Prerequisites
 ```bash
@@ -39,7 +82,6 @@ DATABASE_PATH=/var/lib/lastwar/alliance.db
 SESSION_KEY=your-generated-key-here
 PRODUCTION=true
 HTTPS=true
-PORT=8080
 EOF
 ```
 
@@ -72,19 +114,31 @@ sudo certbot --nginx -d your-domain.com
 
 ### 5. Start Application
 ```bash
+# Install build deps if not already done
+sudo apt install -y gcc g++ build-essential tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev
+
 # Build
 go build -o alliance-manager main.go
 
 # Run with environment
-export $(cat .env | xargs)
+export $(grep -v '^#' .env | xargs)
 ./alliance-manager
 ```
 
-Or use systemd service (see DEPLOYMENT.md).
+Or use the systemd service (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 ## Essential Commands
 
-### Service Management
+### Docker / Podman
+```bash
+docker compose up -d              # Start (detached)
+docker compose down               # Stop
+docker compose logs -f            # Tail logs
+docker compose restart            # Restart
+docker compose up -d --build      # Rebuild after code change
+```
+
+### Systemd Service (Bare-Metal)
 ```bash
 sudo systemctl status lastwar      # Check status
 sudo systemctl start lastwar       # Start service
@@ -104,16 +158,23 @@ sudo certbot renew --dry-run
 
 ### Backups
 ```bash
-# Manual backup
+# Docker: copy the database from the host-mounted volume
+cp ./data/alliance.db ./data/alliance_$(date +%Y%m%d_%H%M%S).db
+
+# Bare-metal: use the backup script installed by install.sh
 sudo /usr/local/bin/backup-lastwar.sh
 
 # List backups
 ls -lh /var/backups/lastwar/
 
-# Restore from backup
+# Restore from backup (bare-metal)
 sudo cp /var/backups/lastwar/alliance_YYYYMMDD_HHMMSS.db /var/lib/lastwar/alliance.db
 sudo chown lastwar:lastwar /var/lib/lastwar/alliance.db
 sudo systemctl restart lastwar
+
+# Restore from backup (Docker)
+cp ./data/alliance_YYYYMMDD_HHMMSS.db ./data/alliance.db
+docker compose restart
 ```
 
 ### Security Checks
@@ -136,12 +197,17 @@ curl https://www.ssllabs.com/ssltest/analyze.html?d=your-domain.com
 
 ### Updates
 ```bash
-# Update system
+# Update system packages
 sudo apt update && sudo apt upgrade -y
 
-# Update application
+# Update application (Docker)
 cd /opt/lastwar
-git pull  # or upload new files
+git pull
+docker compose up -d --build
+
+# Update application (bare-metal)
+cd /opt/lastwar
+git pull
 go build -o alliance-manager main.go
 sudo systemctl restart lastwar
 ```
@@ -245,18 +311,27 @@ fi
 
 ## Need Help?
 
-1. Check [DEPLOYMENT.md](DEPLOYMENT.md) for detailed guide
-2. Review logs: `sudo journalctl -u lastwar -f`
-3. Check application status: `sudo systemctl status lastwar`
-4. Verify reverse proxy: `sudo systemctl status caddy` or `sudo systemctl status nginx`
-5. Test database: `sqlite3 /var/lib/lastwar/alliance.db ".tables"`
+1. Check [DEPLOYMENT.md](DEPLOYMENT.md) for the detailed guide
+2. Docker logs: `docker compose logs -f`
+3. Systemd logs: `sudo journalctl -u lastwar -f`
+4. Check application status: `sudo systemctl status lastwar` or `docker compose ps`
+5. Verify reverse proxy: `sudo systemctl status caddy` or `sudo systemctl status nginx`
+6. Test database (bare-metal): `sqlite3 /var/lib/lastwar/alliance.db ".tables"`
+7. Test database (Docker): `docker compose exec lastwar sh -c 'sqlite3 /data/alliance.db ".tables"'`
 
 ## Quick Health Check
 
+### Docker
+```bash
+docker compose ps
+docker compose logs --tail=20
+curl -sf http://localhost:8080 && echo "OK" || echo "DOWN"
+```
+
+### Bare-Metal
 Run this to verify everything is working:
 
 ```bash
-# Check all services
 echo "=== Service Status ==="
 sudo systemctl is-active lastwar caddy fail2ban
 

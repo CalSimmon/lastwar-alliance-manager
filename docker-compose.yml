@@ -1,0 +1,18 @@
+services:
+  lastwar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lastwar-alliance:latest
+    container_name: lastwar-alliance
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist the SQLite database in a local ./data folder
+      - ./data:/data
+    environment:
+      DATABASE_PATH: /data/alliance.db
+      # Set a strong random hex string here to keep sessions valid across restarts.
+      # Generate one with: openssl rand -hex 32
+      SESSION_KEY: ""
+    restart: unless-stopped

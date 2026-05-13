@@ -1,4 +1,143 @@
-# Debian Server Deployment Guide
+# Deployment Guide
+
+## Option 1: Docker / Podman (Recommended)
+
+Docker is the easiest and most portable way to deploy Last War Alliance Manager. No Go, GCC, or Tesseract installation needed on the host.
+
+### Prerequisites
+
+- Docker Engine ≥ 24 **or** Podman ≥ 4 with `podman-compose`
+- A domain name pointing to your server (for HTTPS)
+
+### 1. Clone the Repository
+
+```bash
+git clone <your-repo-url> /opt/lastwar
+cd /opt/lastwar
+```
+
+### 2. Generate a Session Key
+
+```bash
+openssl rand -hex 32
+```
+
+### 3. Configure the Compose File
+
+Edit `docker-compose.yml` and set `SESSION_KEY` to the value from the previous step:
+
+```yaml
+environment:
+  DATABASE_PATH: /data/alliance.db
+  SESSION_KEY: "your-64-char-hex-key-here"
+```
+
+### 4. Start the Application
+
+```bash
+# Docker
+docker compose up -d
+
+# Podman
+podman-compose up -d
+```
+
+The database is persisted in `./data/alliance.db` on the host.
+
+### 5. Set Up a Reverse Proxy with HTTPS
+
+#### Option A: Caddy (Automatic HTTPS — Recommended)
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install caddy
+```
+
+Create `/etc/caddy/Caddyfile`:
+
+```
+your-domain.com {
+    reverse_proxy localhost:8080
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
+
+    log {
+        output file /var/log/caddy/lastwar-access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}
+```
+
+```bash
+sudo systemctl enable --now caddy
+sudo systemctl reload caddy
+```
+
+#### Option B: Nginx + Certbot
+
+See the Nginx section later in this document for the full configuration.
+
+### 6. Useful Docker Commands
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop the service
+docker compose down
+
+# Restart
+docker compose restart
+
+# Rebuild after a code change
+docker compose up -d --build
+
+# Open a shell inside the running container
+docker compose exec lastwar sh
+
+# Manual database backup
+docker compose exec lastwar sh -c 'cp /data/alliance.db /data/alliance_backup_$(date +%Y%m%d_%H%M%S).db'
+```
+
+### 7. Automated Backups (Docker)
+
+Add a cron job on the host to copy the database file out of the volume:
+
+```bash
+sudo tee /usr/local/bin/backup-lastwar.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/var/backups/lastwar"
+mkdir -p "$BACKUP_DIR"
+cp /opt/lastwar/data/alliance.db "$BACKUP_DIR/alliance_$(date +%Y%m%d_%H%M%S).db"
+find "$BACKUP_DIR" -name "alliance_*.db" -mtime +7 -delete
+EOF
+sudo chmod +x /usr/local/bin/backup-lastwar.sh
+
+# Run daily at 02:00
+echo "0 2 * * * root /usr/local/bin/backup-lastwar.sh" | sudo tee /etc/cron.d/lastwar-backup
+```
+
+### 8. Updating the Application (Docker)
+
+```bash
+cd /opt/lastwar
+git pull
+docker compose up -d --build
+```
+
+---
+
+## Option 2: Bare-Metal — Debian Server Deployment Guide
 
 ## Quick Setup with Caddy (Recommended - Automatic HTTPS)
 
@@ -7,9 +146,9 @@ Caddy automatically handles Let's Encrypt certificates with zero configuration.
 ### 1. Install Go on Debian
 
 ```bash
-# Install Go 1.21 or higher
-wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
+# Install Go 1.23 or higher
+wget https://go.dev/dl/go1.23.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 source ~/.bashrc
 go version
@@ -19,7 +158,7 @@ go version
 
 ```bash
 sudo apt update
-sudo apt install -y gcc build-essential
+sudo apt install -y gcc g++ build-essential tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev
 ```
 
 ### 3. Deploy Application
@@ -57,7 +196,9 @@ User=lastwar
 Group=lastwar
 WorkingDirectory=/opt/lastwar
 Environment="DATABASE_PATH=/var/lib/lastwar/alliance.db"
-Environment="PORT=8080"
+Environment="SESSION_KEY=replace-with-output-of-openssl-rand-hex-32"
+Environment="PRODUCTION=true"
+Environment="HTTPS=true"
 ExecStart=/opt/lastwar/alliance-manager
 Restart=always
 RestartSec=5
