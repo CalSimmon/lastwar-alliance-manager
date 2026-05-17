@@ -1264,6 +1264,13 @@ button {
     margin-bottom: 5px;
 }
 
+.member-nickname {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-bottom: 5px;
+}
+
 .member-rank {
     display: inline-block;
     padding: 5px 15px;
@@ -2068,9 +2075,46 @@ button {
     margin-bottom: 30px;
 }
 
+.message-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.message-section-header h3 {
+    color: var(--text-primary);
+    margin: 0;
+}
+
 .weekly-message-section h3 {
     color: var(--text-primary);
     margin-bottom: 15px;
+}
+
+.dismiss-section-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.dismiss-section-btn:hover {
+    background: var(--accent-bg-hover);
+    color: var(--text-secondary);
+    border-color: var(--accent-primary);
+}
+
+.submit-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 .message-box {

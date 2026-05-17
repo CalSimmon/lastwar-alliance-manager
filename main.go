@@ -39,6 +39,7 @@ import (
 type Member struct {
 	ID             int     `json:"id"`
 	Name           string  `json:"name"`
+	Nickname       *string `json:"nickname,omitempty"`
 	Rank           string  `json:"rank"`
 	Eligible       bool    `json:"eligible"`
 	Power          *int64  `json:"power,omitempty"`
@@ -84,6 +85,8 @@ type TrainSchedule struct {
 	ConductorShowedUp   *bool   `json:"conductor_showed_up"`
 	ActualConductorID   *int    `json:"actual_conductor_id"`
 	ActualConductorName *string `json:"actual_conductor_name"`
+	VipID               *int    `json:"vip_id,omitempty"`
+	VipName             *string `json:"vip_name,omitempty"`
 	Notes               *string `json:"notes"`
 	CreatedAt           string  `json:"created_at"`
 }
@@ -845,6 +848,25 @@ func initDB() error {
 		log.Println("Database migration: Added eligible column to members table")
 	}
 
+	// Migrate members table to add nickname column if missing
+	var nicknameColumnExists bool
+	err = db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('members')
+		WHERE name = 'nickname'
+	`).Scan(&nicknameColumnExists)
+	if err != nil {
+		return err
+	}
+
+	if !nicknameColumnExists {
+		_, err = db.Exec(`ALTER TABLE members ADD COLUMN nickname TEXT`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added nickname column to members table")
+	}
+
 	// Create users table
 	createUsersTableSQL := `CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -972,6 +994,24 @@ func initDB() error {
 			return err
 		}
 		log.Println("Database migration: Added actual_conductor_id column to train_schedules table")
+	}
+
+	// Migrate existing train_schedules table to add vip_id column if missing
+	var vipIDColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('train_schedules') WHERE name = 'vip_id'`).Scan(&vipIDColumnExists)
+	if err != nil {
+		return err
+	}
+	if !vipIDColumnExists {
+		_, err = db.Exec(`ALTER TABLE train_schedules ADD COLUMN vip_id INTEGER REFERENCES members(id) ON DELETE SET NULL`)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`ALTER TABLE train_schedules ADD COLUMN vip_name_snapshot TEXT`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added vip_id and vip_name_snapshot columns to train_schedules table")
 	}
 
 	// Create award_types table
@@ -1406,6 +1446,28 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added vs_points_daily_target and vs_points_weekly_target columns to settings table")
+	}
+
+	// Migrate settings table to add backup_rotation_order column if missing
+	var backupRotationColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='backup_rotation_order'`).Scan(&backupRotationColumnExists)
+	if err != nil || !backupRotationColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN backup_rotation_order TEXT NOT NULL DEFAULT '[]'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added backup_rotation_order column to settings table")
+	}
+
+	// Migrate settings table to add train_week_mode column if missing
+	var trainWeekModeColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='train_week_mode'`).Scan(&trainWeekModeColumnExists)
+	if err != nil || !trainWeekModeColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN train_week_mode TEXT NOT NULL DEFAULT 'win'`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added train_week_mode column to settings table")
 	}
 
 	// Migrate settings table to add alliance_short_name column if missing
@@ -2316,7 +2378,7 @@ func getLoginHistory(w http.ResponseWriter, r *http.Request) {
 // Get all members
 func getMembers(w http.ResponseWriter, r *http.Request) {
 	query := `
-		SELECT m.id, m.name, m.rank, COALESCE(m.eligible, 1),
+		SELECT m.id, m.name, m.nickname, m.rank, COALESCE(m.eligible, 1),
 		       (SELECT ph.power 
 		        FROM power_history ph 
 		        WHERE ph.member_id = m.id 
@@ -2336,9 +2398,13 @@ func getMembers(w http.ResponseWriter, r *http.Request) {
 	members := []Member{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.ID, &m.Name, &m.Rank, &m.Eligible, &m.Power); err != nil {
+		var nickname sql.NullString
+		if err := rows.Scan(&m.ID, &m.Name, &nickname, &m.Rank, &m.Eligible, &m.Power); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if nickname.Valid && nickname.String != "" {
+			m.Nickname = &nickname.String
 		}
 		members = append(members, m)
 	}
@@ -2403,7 +2469,12 @@ func createMember(w http.ResponseWriter, r *http.Request) {
 		m.Eligible = true
 	}
 
-	result, err := db.Exec("INSERT INTO members (name, rank, eligible) VALUES (?, ?, ?)", m.Name, m.Rank, m.Eligible)
+	var nicknameVal interface{}
+	if m.Nickname != nil && *m.Nickname != "" {
+		nicknameVal = *m.Nickname
+	}
+
+	result, err := db.Exec("INSERT INTO members (name, nickname, rank, eligible) VALUES (?, ?, ?, ?)", m.Name, nicknameVal, m.Rank, m.Eligible)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2432,7 +2503,12 @@ func updateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.Exec("UPDATE members SET name = ?, rank = ?, eligible = ? WHERE id = ?", m.Name, m.Rank, m.Eligible, id)
+	var nicknameVal interface{}
+	if m.Nickname != nil && *m.Nickname != "" {
+		nicknameVal = *m.Nickname
+	}
+
+	_, err = db.Exec("UPDATE members SET name = ?, nickname = ?, rank = ?, eligible = ? WHERE id = ?", m.Name, nicknameVal, m.Rank, m.Eligible, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2673,11 +2749,14 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 			COALESCE(m2.rank, '') as backup_rank,
 			ts.conductor_showed_up, ts.actual_conductor_id,
 			COALESCE(m3.name, '[Removed Member]') as actual_conductor_name,
-			ts.notes, ts.created_at
+			ts.notes, ts.created_at,
+			ts.vip_id,
+			COALESCE(m4.name, ts.vip_name_snapshot, '') as vip_name
 		FROM train_schedules ts
 		LEFT JOIN members m1 ON ts.conductor_id = m1.id AND m1.deleted_at IS NULL
 		LEFT JOIN members m2 ON ts.backup_id = m2.id AND m2.deleted_at IS NULL
 		LEFT JOIN members m3 ON ts.actual_conductor_id = m3.id
+		LEFT JOIN members m4 ON ts.vip_id = m4.id AND m4.deleted_at IS NULL
 	`
 
 	var rows *sql.Rows
@@ -2705,10 +2784,13 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 		var score sql.NullInt64
 		var actualConductorID sql.NullInt64
 		var actualConductorName sql.NullString
+		var vipID sql.NullInt64
+		var vipName sql.NullString
 
 		if err := rows.Scan(&ts.ID, &ts.Date, &ts.ConductorID, &ts.ConductorName,
 			&score, &ts.BackupID, &ts.BackupName, &ts.BackupRank, &showedUp,
-			&actualConductorID, &actualConductorName, &notes, &ts.CreatedAt); err != nil {
+			&actualConductorID, &actualConductorName, &notes, &ts.CreatedAt,
+			&vipID, &vipName); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -2729,6 +2811,13 @@ func getTrainSchedules(w http.ResponseWriter, r *http.Request) {
 		}
 		if actualConductorName.Valid {
 			ts.ActualConductorName = &actualConductorName.String
+		}
+		if vipID.Valid {
+			v := int(vipID.Int64)
+			ts.VipID = &v
+		}
+		if vipName.Valid && vipName.String != "" {
+			ts.VipName = &vipName.String
 		}
 
 		schedules = append(schedules, ts)
@@ -2765,10 +2854,17 @@ func createTrainSchedule(w http.ResponseWriter, r *http.Request) {
 	var backupSnapshot string
 	db.QueryRow("SELECT name FROM members WHERE id = ?", ts.BackupID).Scan(&backupSnapshot)
 
+	var vipIDVal interface{}
+	var vipSnapshot string
+	if ts.VipID != nil && *ts.VipID > 0 {
+		vipIDVal = *ts.VipID
+		db.QueryRow("SELECT name FROM members WHERE id = ?", *ts.VipID).Scan(&vipSnapshot)
+	}
+
 	// Use INSERT OR REPLACE to allow updating schedules created by auto-schedule
 	result, err := db.Exec(
-		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, actual_conductor_id, notes, conductor_name_snapshot, backup_name_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, conductorSnapshot, backupSnapshot)
+		"INSERT OR REPLACE INTO train_schedules (date, conductor_id, backup_id, conductor_score, conductor_showed_up, actual_conductor_id, notes, conductor_name_snapshot, backup_name_snapshot, vip_id, vip_name_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, conductorSnapshot, backupSnapshot, vipIDVal, vipSnapshot)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2831,9 +2927,16 @@ func updateTrainSchedule(w http.ResponseWriter, r *http.Request) {
 		db.QueryRow("SELECT name FROM members WHERE id = ?", ts.BackupID).Scan(&updBackupSnapshot)
 	}
 
+	var updVipIDVal interface{}
+	var updVipSnapshot string
+	if ts.VipID != nil && *ts.VipID > 0 {
+		updVipIDVal = *ts.VipID
+		db.QueryRow("SELECT name FROM members WHERE id = ?", *ts.VipID).Scan(&updVipSnapshot)
+	}
+
 	_, err = db.Exec(
-		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, actual_conductor_id = ?, notes = ?, conductor_name_snapshot = ?, backup_name_snapshot = ? WHERE id = ?",
-		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, updConductorSnapshot, updBackupSnapshot, id)
+		"UPDATE train_schedules SET date = ?, conductor_id = ?, backup_id = ?, conductor_score = ?, conductor_showed_up = ?, actual_conductor_id = ?, notes = ?, conductor_name_snapshot = ?, backup_name_snapshot = ?, vip_id = ?, vip_name_snapshot = ? WHERE id = ?",
+		ts.Date, ts.ConductorID, ts.BackupID, ts.ConductorScore, ts.ConductorShowedUp, ts.ActualConductorID, ts.Notes, updConductorSnapshot, updBackupSnapshot, updVipIDVal, updVipSnapshot, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -4378,6 +4481,205 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Settings updated successfully"})
 }
 
+// Get backup rotation order (returns ordered member list with member details)
+func getBackupRotation(w http.ResponseWriter, r *http.Request) {
+	var rotationJSON string
+	err := db.QueryRow(`SELECT COALESCE(backup_rotation_order, '[]') FROM settings WHERE id = 1`).Scan(&rotationJSON)
+	if err != nil {
+		rotationJSON = "[]"
+	}
+
+	var order []int
+	json.Unmarshal([]byte(rotationJSON), &order)
+
+	// Fetch all R4/R5 members
+	rows, err := db.Query(`SELECT id, name, rank FROM members WHERE rank IN ('R4', 'R5') AND deleted_at IS NULL ORDER BY name`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type RotationMember struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+		Rank string `json:"rank"`
+	}
+
+	allR4R5 := []RotationMember{}
+	for rows.Next() {
+		var m RotationMember
+		rows.Scan(&m.ID, &m.Name, &m.Rank)
+		allR4R5 = append(allR4R5, m)
+	}
+
+	// Build ordered list: first those in rotation (in order), then others
+	ordered := []RotationMember{}
+	inRotation := map[int]bool{}
+	memberByID := map[int]RotationMember{}
+	for _, m := range allR4R5 {
+		memberByID[m.ID] = m
+	}
+	for _, id := range order {
+		if m, ok := memberByID[id]; ok {
+			ordered = append(ordered, m)
+			inRotation[id] = true
+		}
+	}
+	for _, m := range allR4R5 {
+		if !inRotation[m.ID] {
+			ordered = append(ordered, m)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"order":   order,
+		"members": ordered,
+	})
+}
+
+// Save backup rotation order
+func saveBackupRotation(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Order []int `json:"order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Expected JSON body with 'order' array", http.StatusBadRequest)
+		return
+	}
+	if req.Order == nil {
+		req.Order = []int{}
+	}
+	data, _ := json.Marshal(req.Order)
+	_, err := db.Exec(`UPDATE settings SET backup_rotation_order = ? WHERE id = 1`, string(data))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Backup rotation saved"})
+}
+
+// Get train week mode (win/save)
+func getTrainWeekMode(w http.ResponseWriter, r *http.Request) {
+	var mode string
+	err := db.QueryRow(`SELECT COALESCE(train_week_mode, 'win') FROM settings WHERE id = 1`).Scan(&mode)
+	if err != nil {
+		mode = "win"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"mode": mode})
+}
+
+// Set train week mode
+func setTrainWeekMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Mode != "win" && req.Mode != "save") {
+		http.Error(w, "Expected JSON body with 'mode': 'win' or 'save'", http.StatusBadRequest)
+		return
+	}
+	_, err := db.Exec(`UPDATE settings SET train_week_mode = ? WHERE id = 1`, req.Mode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"mode": req.Mode})
+}
+
+// Lucky draw for Save Week mode
+// POST /api/train-schedules/lucky-draw
+// Body: { "type": "conductor"|"vip", "week": "YYYY-MM-DD" }
+// Returns: { "winner": { id, name, rank }, "eligible": [...], "pool_size": N }
+func luckyDraw(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type string `json:"type"` // "conductor" or "vip"
+		Week string `json:"week"` // ISO week start date YYYY-MM-DD
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Type != "conductor" && req.Type != "vip" {
+		http.Error(w, "type must be 'conductor' or 'vip'", http.StatusBadRequest)
+		return
+	}
+	if req.Week == "" {
+		http.Error(w, "week is required (YYYY-MM-DD)", http.StatusBadRequest)
+		return
+	}
+
+	// Donation thresholds: conductor = 60k, vip = 40k
+	threshold := int64(40000)
+	if req.Type == "conductor" {
+		threshold = int64(60000)
+	}
+
+	// Eligible = members with tech donations >= threshold for the given week
+	// We look up the donations table. Since the donations table may not exist yet,
+	// fall back to all eligible members if the table doesn't exist.
+	type EligibleMember struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+		Rank string `json:"rank"`
+	}
+
+	eligible := []EligibleMember{}
+
+	rows, err := db.Query(`
+		SELECT m.id, m.name, m.rank
+		FROM members m
+		INNER JOIN tech_donations d ON d.member_id = m.id AND d.week_date = ?
+		WHERE m.deleted_at IS NULL AND m.eligible = 1 AND d.amount >= ?
+		ORDER BY m.name`, req.Week, threshold)
+
+	if err != nil {
+		// Donations table may not exist yet — fall back to all eligible members
+		log.Printf("luckyDraw: donations query failed (%v), falling back to all eligible members", err)
+		rows, err = db.Query(`SELECT id, name, rank FROM members WHERE deleted_at IS NULL AND eligible = 1 ORDER BY name`)
+		if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m EligibleMember
+		rows.Scan(&m.ID, &m.Name, &m.Rank)
+		eligible = append(eligible, m)
+	}
+
+	if len(eligible) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"winner":    nil,
+			"eligible":  eligible,
+			"pool_size": 0,
+			"message":   "No eligible members found for this week",
+		})
+		return
+	}
+
+	// Pick a random winner
+	idxBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(eligible))))
+	winnerIdx := 0
+	if err == nil {
+		winnerIdx = int(idxBig.Int64())
+	}
+	winner := eligible[winnerIdx]
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"winner":    winner,
+		"eligible":  eligible,
+		"pool_size": len(eligible),
+	})
+}
+
 // Get member rankings with detailed score breakdown
 func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 	// Always include all awards (active and inactive) - filtering is done on client side
@@ -4463,7 +4765,7 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate rankings for each member
-	var rankings []MemberRanking
+	rankings := make([]MemberRanking, 0)
 	for _, member := range members {
 		ranking := MemberRanking{
 			Member:         member,
@@ -5431,6 +5733,196 @@ func deleteStormAssignments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Import member list from an alliance roster screenshot using OCR
+func importMemberScreenshot(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "Failed to read image", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read image data", http.StatusInternalServerError)
+		return
+	}
+
+	// Preprocess and OCR
+	processedData, err := preprocessImageForOCR(imageData)
+	if err != nil {
+		log.Printf("Image preprocessing failed: %v, using original", err)
+		processedData = imageData
+	}
+
+	client := gosseract.NewClient()
+	defer client.Close()
+
+	if err := client.SetImageFromBytes(processedData); err != nil {
+		http.Error(w, "Failed to load image for OCR", http.StatusInternalServerError)
+		return
+	}
+
+	var ocrText string
+	for _, mode := range []gosseract.PageSegMode{gosseract.PSM_AUTO, gosseract.PSM_SINGLE_BLOCK, gosseract.PSM_SPARSE_TEXT} {
+		client.SetPageSegMode(mode)
+		if t, err := client.Text(); err == nil && len(strings.TrimSpace(t)) > 0 {
+			ocrText = t
+			break
+		}
+	}
+
+	if strings.TrimSpace(ocrText) == "" {
+		http.Error(w, "OCR failed: no text extracted from image", http.StatusUnprocessableEntity)
+		return
+	}
+	log.Printf("Member list OCR text:\n%s\n---END OCR---", ocrText)
+
+	// Parse OCR text for Name + Rank entries
+	// Alliance roster lines typically look like: "R4  PlayerName  123,456,789"
+	// or "PlayerName  R4" or "PlayerName (R4)"
+	rankRe := regexp.MustCompile(`(?i)\bR([1-5])\b`)
+	validRanks := map[string]bool{"R1": true, "R2": true, "R3": true, "R4": true, "R5": true}
+
+	// Get existing active members
+	existingMembers := make(map[string]Member)
+	rows, dbErr := db.Query("SELECT id, name, rank FROM members WHERE deleted_at IS NULL")
+	if dbErr == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var m Member
+			rows.Scan(&m.ID, &m.Name, &m.Rank)
+			existingMembers[strings.ToLower(m.Name)] = m
+		}
+	}
+
+	detectedMembers := []DetectedMember{}
+	parseErrors := []string{}
+	seenNames := map[string]bool{}
+
+	for _, line := range strings.Split(ocrText, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		matches := rankRe.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		rank := "R" + strings.ToUpper(matches[1])
+		if !validRanks[rank] {
+			continue
+		}
+
+		// Remove the rank token and surrounding noise (power numbers, special chars)
+		cleaned := rankRe.ReplaceAllString(line, "")
+		// Remove numbers that look like power (6+ digit sequences with optional commas)
+		cleaned = regexp.MustCompile(`[\d,]{5,}`).ReplaceAllString(cleaned, "")
+		// Remove leftover punctuation except letters/digits/spaces/hyphens/underscores/dots
+		cleaned = regexp.MustCompile(`[^\p{L}\d\s\-_.]`).ReplaceAllString(cleaned, " ")
+		name := strings.Join(strings.Fields(cleaned), " ")
+
+		if len(name) < 2 {
+			parseErrors = append(parseErrors, fmt.Sprintf("Could not extract name from line: %q", line))
+			continue
+		}
+
+		nameLower := strings.ToLower(name)
+		if seenNames[nameLower] {
+			continue
+		}
+		seenNames[nameLower] = true
+
+		detected := DetectedMember{Name: name, Rank: rank}
+
+		if existing, found := existingMembers[nameLower]; found {
+			if existing.Rank != rank {
+				detected.RankChanged = true
+				detected.OldRank = existing.Rank
+			}
+		} else {
+			detected.IsNew = true
+			var similar []string
+			for existingLower, em := range existingMembers {
+				if areSimilar(nameLower, existingLower) {
+					similar = append(similar, em.Name)
+				}
+			}
+			if len(similar) > 0 {
+				detected.SimilarMatch = similar
+			}
+		}
+
+		detectedMembers = append(detectedMembers, detected)
+	}
+
+	// Members in DB not detected in screenshot
+	membersToRemove := []MemberToRemove{}
+	for nameLower, em := range existingMembers {
+		if !seenNames[nameLower] {
+			membersToRemove = append(membersToRemove, MemberToRemove{ID: em.ID, Name: em.Name, Rank: em.Rank})
+		}
+	}
+
+	result := map[string]interface{}{
+		"detected_members":  detectedMembers,
+		"members_to_remove": membersToRemove,
+		"errors":            parseErrors,
+		"total_rows":        len(detectedMembers),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// Auto-register a list of player names as R1 members (for unmatched OCR results)
+func autoRegisterMembers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Names) == 0 {
+		http.Error(w, "Expected JSON body with 'names' array", http.StatusBadRequest)
+		return
+	}
+
+	added := []string{}
+	skipped := []string{}
+
+	for _, name := range req.Names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		// Only insert if not already present
+		var existing int
+		err := db.QueryRow("SELECT COUNT(*) FROM members WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL", name).Scan(&existing)
+		if err != nil || existing > 0 {
+			skipped = append(skipped, name)
+			continue
+		}
+		_, err = db.Exec("INSERT INTO members (name, rank, eligible) VALUES (?, 'R1', 1)", name)
+		if err != nil {
+			log.Printf("autoRegisterMembers: failed to insert %q: %v", name, err)
+			skipped = append(skipped, name)
+			continue
+		}
+		added = append(added, name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"added":   added,
+		"skipped": skipped,
+		"message": fmt.Sprintf("Registered %d new member(s) as R1", len(added)),
+	})
 }
 
 // Confirm and update members in database
@@ -6893,8 +7385,8 @@ func processVSPointsScreenshot(w http.ResponseWriter, r *http.Request) {
 		err := tx.QueryRow("SELECT id, name FROM members WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL", record.MemberName).Scan(&memberID, &memberName)
 
 		if err == sql.ErrNoRows {
-			// Try fuzzy matching
-			rows, err := tx.Query("SELECT id, name FROM members WHERE deleted_at IS NULL")
+			// Try fuzzy matching (also checks nicknames)
+			rows, err := tx.Query("SELECT id, name, nickname FROM members WHERE deleted_at IS NULL")
 			if err != nil {
 				continue
 			}
@@ -6906,11 +7398,18 @@ func processVSPointsScreenshot(w http.ResponseWriter, r *http.Request) {
 			for rows.Next() {
 				var id int
 				var name string
-				if err := rows.Scan(&id, &name); err != nil {
+				var nickname sql.NullString
+				if err := rows.Scan(&id, &name, &nickname); err != nil {
 					continue
 				}
 
 				score := calculateSimilarity(record.MemberName, name)
+				// Also score against nickname if present
+				if nickname.Valid && nickname.String != "" {
+					if ns := calculateSimilarity(record.MemberName, nickname.String); ns > score {
+						score = ns
+					}
+				}
 				if score > bestScore {
 					bestScore = score
 					bestMatch = name
@@ -7064,20 +7563,22 @@ func processPowerScreenshot(w http.ResponseWriter, r *http.Request) {
 	failedCount := 0
 	errors := []string{}
 
-	// Get all member names for fuzzy matching
+	// Get all member names (and nicknames) for fuzzy matching
 	allMembers := []struct {
-		ID   int
-		Name string
+		ID       int
+		Name     string
+		Nickname string
 	}{}
-	rows, err := tx.Query("SELECT id, name FROM members WHERE deleted_at IS NULL")
+	rows, err := tx.Query("SELECT id, name, COALESCE(nickname, '') FROM members WHERE deleted_at IS NULL")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var m struct {
-				ID   int
-				Name string
+				ID       int
+				Name     string
+				Nickname string
 			}
-			if rows.Scan(&m.ID, &m.Name) == nil {
+			if rows.Scan(&m.ID, &m.Name, &m.Nickname) == nil {
 				allMembers = append(allMembers, m)
 			}
 		}
@@ -7094,14 +7595,20 @@ func processPowerScreenshot(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			// Try fuzzy matching with Levenshtein-like similarity
+			// Try fuzzy matching with Levenshtein-like similarity (also checks nicknames)
 			bestMatch := ""
 			bestMatchID := 0
 			bestScore := 0
 
 			for _, member := range allMembers {
 				score := calculateSimilarity(record.MemberName, member.Name)
-				log.Printf("Comparing '%s' with '%s': score=%d%%", record.MemberName, member.Name, score)
+				// Also score against nickname if present
+				if member.Nickname != "" {
+					if ns := calculateSimilarity(record.MemberName, member.Nickname); ns > score {
+						score = ns
+					}
+				}
+				log.Printf("Comparing '%s' with '%s' (nickname: '%s'): score=%d%%", record.MemberName, member.Name, member.Nickname, score)
 				if score > bestScore {
 					bestScore = score
 					bestMatch = member.Name
@@ -7186,6 +7693,8 @@ func main() {
 	router.HandleFunc("/api/members/{id}", authMiddleware(rankManagementMiddleware(deleteMember))).Methods("DELETE")
 	router.HandleFunc("/api/members/import", authMiddleware(rankManagementMiddleware(importCSV))).Methods("POST")
 	router.HandleFunc("/api/members/import/confirm", authMiddleware(rankManagementMiddleware(confirmMemberUpdates))).Methods("POST")
+	router.HandleFunc("/api/members/import-screenshot", authMiddleware(rankManagementMiddleware(importMemberScreenshot))).Methods("POST")
+	router.HandleFunc("/api/members/auto-register", authMiddleware(rankManagementMiddleware(autoRegisterMembers))).Methods("POST")
 
 	// Train schedule routes (protected)
 	router.HandleFunc("/api/train-schedules", authMiddleware(getTrainSchedules)).Methods("GET")
@@ -7193,6 +7702,7 @@ func main() {
 	router.HandleFunc("/api/train-schedules/daily-message", authMiddleware(generateDailyMessage)).Methods("GET")
 	router.HandleFunc("/api/train-schedules/conductor-messages", authMiddleware(generateConductorMessages)).Methods("GET")
 	router.HandleFunc("/api/train-schedules/auto-schedule", authMiddleware(autoSchedule)).Methods("POST")
+	router.HandleFunc("/api/train-schedules/lucky-draw", authMiddleware(rankManagementMiddleware(luckyDraw))).Methods("POST")
 	router.HandleFunc("/api/train-schedules", authMiddleware(createTrainSchedule)).Methods("POST")
 	router.HandleFunc("/api/train-schedules/{id}", authMiddleware(updateTrainSchedule)).Methods("PUT")
 	router.HandleFunc("/api/train-schedules/{id}", authMiddleware(deleteTrainSchedule)).Methods("DELETE")
@@ -7229,6 +7739,10 @@ func main() {
 	// Settings routes (protected)
 	router.HandleFunc("/api/settings", authMiddleware(getSettings)).Methods("GET")
 	router.HandleFunc("/api/settings", authMiddleware(adminR5Middleware(updateSettings))).Methods("PUT")
+	router.HandleFunc("/api/settings/backup-rotation", authMiddleware(getBackupRotation)).Methods("GET")
+	router.HandleFunc("/api/settings/backup-rotation", authMiddleware(rankManagementMiddleware(saveBackupRotation))).Methods("PUT")
+	router.HandleFunc("/api/settings/train-week-mode", authMiddleware(getTrainWeekMode)).Methods("GET")
+	router.HandleFunc("/api/settings/train-week-mode", authMiddleware(rankManagementMiddleware(setTrainWeekMode))).Methods("PUT")
 
 	// Rankings routes (protected)
 	router.HandleFunc("/api/rankings", authMiddleware(getMemberRankings)).Methods("GET")

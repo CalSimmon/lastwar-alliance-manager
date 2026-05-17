@@ -86,6 +86,7 @@ async function loadRankings() {
         const response = await fetch(RANKINGS_URL);
         if (!response.ok) throw new Error('Failed to load rankings');
         currentData = await response.json();
+        if (!Array.isArray(currentData.rankings)) currentData.rankings = [];
 
         maxScore = Math.max(...currentData.rankings.map(r => r.total_score), 1);
         filteredRankings = currentData.rankings;

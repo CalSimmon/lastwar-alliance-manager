@@ -181,6 +181,17 @@ function hideWeeklyMessage() {
     document.getElementById('weekly-message-section').style.display = 'none';
 }
 
+// Dismiss button handlers for message sections
+document.getElementById('dismiss-weekly-btn').addEventListener('click', () => {
+    document.getElementById('weekly-message-section').style.display = 'none';
+});
+document.getElementById('dismiss-daily-btn').addEventListener('click', () => {
+    document.getElementById('daily-message-section').style.display = 'none';
+});
+document.getElementById('dismiss-conductor-btn').addEventListener('click', () => {
+    document.getElementById('conductor-messages-section').style.display = 'none';
+});
+
 // Generate weekly message (will be setup in init if user has permission)
 async function generateWeeklyMessage() {
     const startDate = formatDate(currentWeekStart);
@@ -434,6 +445,9 @@ function renderScheduleGrid() {
                 }
             }
             html += `</div>`;
+            if (schedule.vip_name) {
+                html += `<div class="vip-seat"><strong>VIP:</strong> ${escapeHtml(schedule.vip_name)}</div>`;
+            }
             if (schedule.notes) {
                 html += `<div class="notes"><strong>Notes:</strong> ${escapeHtml(schedule.notes)}</div>`;
             }
@@ -481,6 +495,7 @@ function openScheduleModal(dateStr) {
     // Reset search inputs
     document.getElementById('conductor-search').value = '';
     document.getElementById('backup-search').value = '';
+    document.getElementById('vip-search').value = '';
     document.getElementById('actual-conductor-search').value = '';
     
     // Populate conductor select
@@ -488,6 +503,17 @@ function openScheduleModal(dateStr) {
     
     // Populate backup select (R4 and R5 only)
     populateBackupSelect(backupMembers, schedule);
+
+    // Populate VIP select (all active members)
+    populateVipSelect(allMembers, schedule);
+
+    // Show "Next in rotation" hint near backup select (only for new schedules)
+    if (!schedule) {
+        fetchAndShowRotationHint();
+    } else {
+        const hint = document.getElementById('rotation-hint');
+        if (hint) hint.style.display = 'none';
+    }
     
     // Populate actual conductor select (all members)
     populateActualConductorSelect(allMembers, schedule);
@@ -536,6 +562,15 @@ function openScheduleModal(dateStr) {
     
     // Setup attendance change handler
     setupAttendanceHandlers();
+    
+    // Save button: enable only when a conductor is selected
+    const submitBtn = document.getElementById('modal-submit');
+    const conductorSelect = document.getElementById('conductor-select');
+    const updateSubmitState = () => {
+        submitBtn.disabled = !conductorSelect.value;
+    };
+    updateSubmitState();
+    conductorSelect.addEventListener('change', updateSubmitState);
     
     document.getElementById('modal-title').textContent = schedule ? 'Edit Schedule' : 'Schedule Train';
     modal.style.display = 'flex';
@@ -611,7 +646,42 @@ function populateBackupSelect(members, schedule) {
     });
 }
 
+// Populate VIP select (any member, optional)
+function populateVipSelect(members, schedule) {
+    const vipSelect = document.getElementById('vip-select');
+    vipSelect.innerHTML = '<option value="">— No VIP assigned —</option>';
+
+    members.forEach(member => {
+        const option = document.createElement('option');
+        option.value = member.id;
+        option.textContent = `${member.name} (${member.rank})`;
+        option.dataset.name = member.name.toLowerCase();
+        if (schedule && schedule.vip_id && member.id === schedule.vip_id) {
+            option.selected = true;
+        }
+        vipSelect.appendChild(option);
+    });
+}
+
 // Populate actual conductor select (shown when backup assigns to someone else)
+async function fetchAndShowRotationHint() {
+    const hint = document.getElementById('rotation-hint');
+    if (!hint) return;
+    try {
+        const res = await fetch('/api/settings/backup-rotation');
+        if (!res.ok) { hint.style.display = 'none'; return; }
+        const data = await res.json();
+        if (data.members && data.members.length > 0) {
+            hint.textContent = `🔄 Next in rotation: ${data.members[0].name} (${data.members[0].rank})`;
+            hint.style.display = 'block';
+        } else {
+            hint.style.display = 'none';
+        }
+    } catch {
+        hint.style.display = 'none';
+    }
+}
+
 function populateActualConductorSelect(members, schedule) {
     const actualConductorSelect = document.getElementById('actual-conductor-select');
     actualConductorSelect.innerHTML = '';
@@ -681,6 +751,8 @@ function setupDropdownSearch() {
     const conductorSelect = document.getElementById('conductor-select');
     const backupSearch = document.getElementById('backup-search');
     const backupSelect = document.getElementById('backup-select');
+    const vipSearch = document.getElementById('vip-search');
+    const vipSelect = document.getElementById('vip-select');
     const actualConductorSearch = document.getElementById('actual-conductor-search');
     const actualConductorSelect = document.getElementById('actual-conductor-select');
     
@@ -694,6 +766,12 @@ function setupDropdownSearch() {
     backupSearch.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase().trim();
         filterSelectOptions(backupSelect, searchTerm);
+    });
+
+    // Filter VIP dropdown
+    vipSearch.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase().trim();
+        filterSelectOptions(vipSelect, searchTerm);
     });
     
     // Filter actual conductor dropdown
@@ -758,6 +836,8 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     const date = document.getElementById('schedule-date').value;
     const conductorId = parseInt(document.getElementById('conductor-select').value);
     const backupId = parseInt(document.getElementById('backup-select').value);
+    const vipSelectVal = document.getElementById('vip-select').value;
+    const vipId = vipSelectVal ? parseInt(vipSelectVal) : null;
     const notes = document.getElementById('notes').value.trim() || null;
     
     const attendanceRadio = document.querySelector('input[name="attendance"]:checked');
@@ -790,6 +870,7 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
         backup_id: backupId,
         conductor_showed_up: conductorShowedUp,
         actual_conductor_id: actualConductorId,
+        vip_id: vipId,
         notes
     };
     
@@ -918,6 +999,9 @@ function renderHistory(filter) {
             }
         }
         html += `</div>`;
+        if (schedule.vip_name) {
+            html += `<div><strong>VIP:</strong> ${escapeHtml(schedule.vip_name)}</div>`;
+        }
         if (schedule.notes) {
             html += `<div class="history-notes">${escapeHtml(schedule.notes)}</div>`;
         }
@@ -1001,6 +1085,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         initializeWeek();
         await loadSchedules();
         await loadHistory();
+        await initWeekMode();
         
         // Setup editing controls based on permissions
         if (canEditSchedule()) {
@@ -1019,3 +1104,96 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 });
+
+// ---- Win/Save week mode ----
+
+async function initWeekMode() {
+    try {
+        const res = await fetch('/api/settings/train-week-mode');
+        if (!res.ok) return;
+        const data = await res.json();
+        applyWeekMode(data.mode || 'win');
+    } catch {}
+
+    // Radio change handler (R4/R5/admin only)
+    document.querySelectorAll('input[name="week-mode"]').forEach(radio => {
+        radio.addEventListener('change', async (e) => {
+            if (!canEditSchedule()) return;
+            try {
+                const res = await fetch('/api/settings/train-week-mode', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: e.target.value })
+                });
+                if (!res.ok) return;
+                applyWeekMode(e.target.value);
+                const saved = document.getElementById('week-mode-saved');
+                if (saved) {
+                    saved.style.display = 'inline';
+                    setTimeout(() => { saved.style.display = 'none'; }, 2000);
+                }
+            } catch {}
+        });
+    });
+
+    // Lock mode radios for read-only users
+    if (!canEditSchedule()) {
+        document.querySelectorAll('input[name="week-mode"]').forEach(r => r.disabled = true);
+    }
+
+    // Lucky draw buttons
+    const drawConductorBtn = document.getElementById('draw-conductor-btn');
+    const drawVipBtn = document.getElementById('draw-vip-btn');
+    if (drawConductorBtn) drawConductorBtn.addEventListener('click', () => runLuckyDraw('conductor'));
+    if (drawVipBtn) drawVipBtn.addEventListener('click', () => runLuckyDraw('vip'));
+}
+
+function applyWeekMode(mode) {
+    const winRadio = document.getElementById('mode-win');
+    const saveRadio = document.getElementById('mode-save');
+    const panel = document.getElementById('lucky-draw-panel');
+    if (winRadio) winRadio.checked = (mode === 'win');
+    if (saveRadio) saveRadio.checked = (mode === 'save');
+    if (panel) panel.style.display = (mode === 'save') ? 'block' : 'none';
+}
+
+async function runLuckyDraw(type) {
+    const panel = document.getElementById('draw-result');
+    const weekDate = getCurrentWeekMonday();
+    panel.innerHTML = '<span style="color:var(--text-muted);">🎲 Drawing...</span>';
+
+    try {
+        const res = await fetch('/api/train-schedules/lucky-draw', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, week: weekDate })
+        });
+        const data = await res.json();
+
+        if (!data.winner) {
+            panel.innerHTML = `<span style="color:var(--text-muted);">${escapeHtml(data.message || 'No eligible members')}</span>`;
+            return;
+        }
+
+        const eligibleList = (data.eligible || []).map(m => escapeHtml(m.name)).join(', ');
+        panel.innerHTML = `
+            <div style="margin-top:8px;">
+                <strong>🏆 ${type === 'conductor' ? 'Conductor' : 'VIP'} Winner:</strong>
+                <span style="font-size:1.1em; color:var(--accent-primary); margin-left:8px;">${escapeHtml(data.winner.name)}</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:6px;">${escapeHtml(data.winner.rank)}</span>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:var(--text-muted);">
+                Pool (${data.pool_size}): ${eligibleList}
+            </div>`;
+    } catch (e) {
+        panel.innerHTML = `<span style="color:var(--danger-color, #e57373);">Draw failed: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+function getCurrentWeekMonday() {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diff));
+    return monday.toISOString().split('T')[0];
+}

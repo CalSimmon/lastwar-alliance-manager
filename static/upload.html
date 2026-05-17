@@ -41,6 +41,7 @@
                         <select id="screenshot-type" class="form-input" style="width: 100%; max-width: 400px;">
                             <option value="power">⚡ Power Rankings</option>
                             <option value="vs-points">⚔️ VS Points (Daily Rank)</option>
+                            <option value="member-list">👥 Alliance Member List (names + ranks)</option>
                         </select>
                         <p id="screenshot-type-hint" class="help-text" style="margin-top: 8px;">
                             Upload power ranking screenshots from the alliance member list.
@@ -96,6 +97,21 @@
 
                 <!-- Result Display -->
                 <div id="result-container"></div>
+
+                <!-- Member list OCR preview (shown only for member-list type) -->
+                <div id="member-ocr-preview" style="display:none; margin-top: 20px;">
+                    <h4 style="color: var(--accent-secondary); margin-bottom: 12px;">📋 Detected Members — Review &amp; Confirm</h4>
+                    <p class="help-text">Review the members extracted from the screenshot. Uncheck any rows you want to skip, then click Confirm.</p>
+                    <div id="member-ocr-list" style="max-height: 350px; overflow-y: auto; margin-bottom: 16px;"></div>
+                    <div id="member-ocr-remove" style="display:none; margin-bottom: 16px;">
+                        <h5 style="color: var(--danger-color, #e57373); margin-bottom: 8px;">⚠️ Members not seen in screenshot (may be absent)</h5>
+                        <p class="help-text" style="font-size:12px;">Check names below to remove them from the database. Leave unchecked to keep them.</p>
+                        <div id="member-ocr-remove-list" style="max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                    <div id="member-ocr-errors" style="display:none; margin-bottom: 12px;"></div>
+                    <button id="confirm-member-ocr-btn" class="btn btn-primary" style="margin-right: 8px;">✔ Confirm &amp; Import Selected</button>
+                    <button id="cancel-member-ocr-btn" class="btn btn-secondary">Cancel</button>
+                </div>
             </div>
         </main>
     </div>

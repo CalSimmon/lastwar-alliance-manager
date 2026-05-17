@@ -116,6 +116,7 @@ function resetMemberForm() {
     editingMemberId = null;
     document.getElementById('member-form').reset();
     document.getElementById('member-eligible').checked = true;
+    document.getElementById('member-nickname').value = '';
     document.getElementById('modal-form-title').textContent = 'Add New Member';
     document.getElementById('submit-btn').textContent = 'Add Member';
 }
@@ -193,18 +194,21 @@ function displayMembers(members) {
         if (canManageRanks) {
             actionsHtml = `
                 <div class="member-actions">
-                    <button class="edit-btn" onclick="editMember(${member.id}, '${escapeHtml(member.name)}', '${escapeHtml(member.rank)}', ${member.eligible !== false})">Edit</button>
+                    <button class="edit-btn" onclick="editMember(${member.id})">Edit</button>
                     <button class="delete-btn" onclick="deleteMember(${member.id}, '${escapeHtml(member.name)}')">Delete</button>
                     ${isR5OrAdmin ? `<button class="create-user-btn" onclick="createUserForMember(${member.id}, '${escapeHtml(member.name)}')">Create User</button>` : ''}
                     <button class="toggle-eligible-btn ${eligibleClass}" onclick="toggleEligible(${member.id}, ${member.eligible !== false})">${eligibleStatus}</button>
                 </div>
             `;
         }
+
+        const nicknameHtml = member.nickname ? `<div class="member-nickname">aka ${escapeHtml(member.nickname)}</div>` : '';
         
         return `
             <div class="member-card">
                 <div class="member-info">
                     <div class="member-name">${escapeHtml(member.name)}</div>
+                    ${nicknameHtml}
                     <span class="member-rank rank-${member.rank.replace(/\s+/g, '-')}">${escapeHtml(member.rank)}</span>
                     ${powerDisplay}
                     <span class="member-eligible ${eligibleClass}">${eligibleStatus}</span>
@@ -248,6 +252,7 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
     }
     
     const name = document.getElementById('member-name').value.trim();
+    const nickname = document.getElementById('member-nickname').value.trim() || null;
     const rank = document.getElementById('member-rank').value;
     const eligible = document.getElementById('member-eligible').checked;
     
@@ -270,7 +275,7 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ name, rank, eligible }),
+                body: JSON.stringify({ name, nickname, rank, eligible }),
             });
 
             if (!response.ok) throw new Error('Failed to update member');
@@ -283,7 +288,7 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ name, rank, eligible }),
+                body: JSON.stringify({ name, nickname, rank, eligible }),
             });
 
             if (!response.ok) {
@@ -306,16 +311,20 @@ document.getElementById('member-form').addEventListener('submit', async (e) => {
 });
 
 // Edit a member
-function editMember(id, name, rank, eligible) {
+function editMember(id) {
     if (!canManageRanks) {
         showToast('You do not have permission to edit members. Only R4 and R5 can do this.', 'warning');
         return;
     }
     
+    const member = allMembers.find(m => m.id === id);
+    if (!member) return;
+
     editingMemberId = id;
-    document.getElementById('member-name').value = name;
-    document.getElementById('member-rank').value = rank;
-    document.getElementById('member-eligible').checked = eligible;
+    document.getElementById('member-name').value = member.name;
+    document.getElementById('member-nickname').value = member.nickname || '';
+    document.getElementById('member-rank').value = member.rank;
+    document.getElementById('member-eligible').checked = member.eligible !== false;
     document.getElementById('modal-form-title').textContent = 'Edit Member';
     document.getElementById('submit-btn').textContent = 'Update Member';
     

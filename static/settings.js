@@ -303,5 +303,113 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (auth) {
         await setupEventListeners();
         await loadSettings();
+        await loadBackupRotation();
     }
+});
+
+// ---- Backup rotation ----
+
+let rotationOrder = []; // ordered array of member IDs
+
+async function loadBackupRotation() {
+    try {
+        const res = await fetch('/api/settings/backup-rotation');
+        if (!res.ok) return;
+        const data = await res.json();
+        rotationOrder = data.order || [];
+        renderRotationList(data.members || []);
+    } catch (e) {
+        console.error('Failed to load backup rotation', e);
+    }
+}
+
+function renderRotationList(members) {
+    const list = document.getElementById('rotation-list');
+    if (!list) return;
+
+    if (members.length === 0) {
+        list.innerHTML = '<p class="info-text">No R4/R5 members found.</p>';
+        return;
+    }
+
+    list.innerHTML = members.map((m, i) => `
+        <div class="rotation-item" data-id="${m.id}" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
+            <span style="color:var(--text-muted); font-size:13px; min-width:24px;">${i + 1}.</span>
+            <span style="flex:1; font-weight:600;">${escapeHtml(m.name)}</span>
+            <span style="color:var(--text-muted); font-size:12px; margin-right:8px;">${m.rank}</span>
+            <button class="rotation-up-btn" data-index="${i}" title="Move up" style="background:none; border:1px solid var(--border-color); border-radius:4px; padding:2px 8px; cursor:pointer; color:var(--text-primary);"
+                ${i === 0 ? 'disabled' : ''}>▲</button>
+            <button class="rotation-down-btn" data-index="${i}" title="Move down" style="background:none; border:1px solid var(--border-color); border-radius:4px; padding:2px 8px; cursor:pointer; color:var(--text-primary);"
+                ${i === members.length - 1 ? 'disabled' : ''}>▼</button>
+        </div>`
+    ).join('');
+
+    list.querySelectorAll('.rotation-up-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.index);
+            if (idx > 0) {
+                const items = getCurrentRotationItems();
+                [items[idx - 1], items[idx]] = [items[idx], items[idx - 1]];
+                renderRotationList(items);
+            }
+        });
+    });
+
+    list.querySelectorAll('.rotation-down-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.index);
+            const items = getCurrentRotationItems();
+            if (idx < items.length - 1) {
+                [items[idx], items[idx + 1]] = [items[idx + 1], items[idx]];
+                renderRotationList(items);
+            }
+        });
+    });
+}
+
+function getCurrentRotationItems() {
+    const list = document.getElementById('rotation-list');
+    return Array.from(list.querySelectorAll('.rotation-item')).map(el => ({
+        id: parseInt(el.dataset.id),
+        name: el.querySelector('span:nth-child(2)').textContent,
+        rank: el.querySelector('span:nth-child(3)').textContent.trim()
+    }));
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const saveRotationBtn = document.getElementById('save-rotation-btn');
+    const statusEl = document.getElementById('rotation-save-status');
+    if (!saveRotationBtn) return;
+
+    saveRotationBtn.addEventListener('click', async () => {
+        const items = getCurrentRotationItems();
+        const order = items.map(m => m.id);
+
+        saveRotationBtn.disabled = true;
+        saveRotationBtn.textContent = 'Saving...';
+        statusEl.textContent = '';
+
+        try {
+            const res = await fetch('/api/settings/backup-rotation', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            statusEl.textContent = '✓ Saved';
+            statusEl.style.color = 'var(--success-color, #81c784)';
+            rotationOrder = order;
+        } catch (e) {
+            statusEl.textContent = '✗ ' + e.message;
+            statusEl.style.color = 'var(--danger-color, #e57373)';
+        } finally {
+            saveRotationBtn.disabled = false;
+            saveRotationBtn.textContent = '💾 Save Rotation Order';
+        }
+    });
 });
