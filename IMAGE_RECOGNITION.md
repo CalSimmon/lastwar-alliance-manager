@@ -1,8 +1,254 @@
-# Image Recognition & OCR Enhancement
+# Image Recognition & OCR
 
 ## Overview
 
-The application now includes intelligent image preprocessing to significantly improve OCR accuracy when processing power ranking screenshots from Last War: Survival.
+The application uses Tesseract OCR (via `gosseract`) to extract player data from Last War: Survival screenshots. Three upload endpoints each follow the same two-phase strategy:
+
+1. **Row-based extraction** (primary) — the image is segmented into individual player rows using edge-based separator detection, then each name and value cell is OCR'd independently with `PSM_SINGLE_LINE`. This is more accurate because a single row has far less noise than the full image.
+2. **Full-image OCR fallback** — if row-based extraction returns too few valid records, the original full-image Tesseract pass is used instead.
+
+All image processing uses Go's standard library only (`image`, `image/color`, `image/draw`, `image/png`). No OpenCV, libvips, ImageMagick, or other external image libraries are required.
+
+---
+
+## Upload Pipelines
+
+### 1. VS Points (`/api/vs-points/process-screenshot`)
+
+**Screenshot layout (759 × 1348 px typical):**
+
+```
+┌──────────────────────────────────────────────┐
+│  Title bar                   (~5% height)    │
+│  Day tabs  Mon Tue Wed Thu Fri Sat  (~6%)    │
+│  Column headers              (~5%)           │
+├──────────────────────────────────────────────┤
+│  Row  │ Avatar+rank │ Name       │  Points   │  ← data rows
+│       │   0–?%      │ ?%–70%     │  70–100%  │    (~68% of height)
+│  ...  │             │            │           │
+├──────────────────────────────────────────────┤
+│  Bottom button               (~10%)          │
+└──────────────────────────────────────────────┘
+```
+
+**Processing flow:**
+
+```
+extractVSPointsDataFromImage(imageData)
+    │
+    ├─ detectDayFromTabRegion()       ← colour-sample the day tab strip
+    │
+    ├─ analyzeScreenshot()            ← compute DataRegion, RowHeight, EstimatedRows
+    │
+    ├─ extractVSPointsByRows()        ← PRIMARY (row-based)
+    │      │
+    │      ├─ convertToGrayscale()   ← once, reused for all rows
+    │      ├─ findRowBoundaries()    ← separator-line scan → exact row [top,bottom] pairs
+    │      └─ per row:
+    │           ├─ detectAvatarEndX() ← avatar/text boundary → nameStartX
+    │           ├─ crop name region  [nameStartX .. 70%] × [0 .. 55% of rowH]
+    │           ├─ crop points region [70% .. 100%] × full rowH
+    │           ├─ scaleImage(3×) + OCR PSM_SINGLE_LINE (name)
+    │           └─ scaleImage(3×) + OCR PSM_SINGLE_LINE, digits whitelist (points)
+    │
+    ├─ quality check: ≥3 records, no \n in names, no UI label matches
+    │
+    └─ extractVSPointsFullImage()     ← FALLBACK (full-image OCR + parseVSPointsText)
+```
+
+**Quality gate before accepting row-based results:**
+- At least 3 records extracted
+- No name contains a newline or carriage return
+- No name matches known UI labels: `commander`, `ranking`, `points`, `nova sapphire`, `reset reapers`
+
+---
+
+### 2. Power Rankings (`/api/power-history/process-screenshot`)
+
+**Screenshot layout (approximate):**
+
+```
+┌──────────────────────────────────────────────┐
+│  Title / tabs / headers      (~17% height)   │
+├──────────────────────────────────────────────┤
+│  Row  │ Avatar+rank │  Name      │  Power    │
+│       │   0–35%     │ 35–80%     │  80–100%  │
+│  ...  │             │            │           │
+├──────────────────────────────────────────────┤
+│  Bottom button               (~10%)          │
+└──────────────────────────────────────────────┘
+```
+
+**Processing flow:**
+
+```
+extractPowerDataFromImage(imageData)
+    │
+    ├─ image.Decode() + analyzeScreenshot()
+    │
+    ├─ extractPowerByRows()           ← PRIMARY (row-based)
+    │      │
+    │      ├─ convertToGrayscale()
+    │      ├─ findRowBoundaries()
+    │      └─ per row:
+    │           ├─ detectAvatarEndX() ← cap at 35% of width
+    │           ├─ crop name region  [avatarEnd .. 80%] × [0 .. 60% of rowH]
+    │           ├─ crop power region [80% .. 100%] × full rowH
+    │           ├─ OCR PSM_SINGLE_LINE (name)
+    │           └─ OCR PSM_SINGLE_LINE, digits whitelist (power)
+    │           └─ validate: power ≥ 1,000,000
+    │
+    ├─ quality gate: ≥3 valid records
+    │
+    └─ full-image OCR fallback        ← preprocessImageForOCR → PSM_AUTO/BLOCK/SPARSE
+           └─ parsePowerRankingsText() ← multi-pattern regex + OCR char substitution
+```
+
+---
+
+### 3. Member List (`/api/members/import-screenshot`)
+
+**Screenshot layout (approximate):**
+
+```
+┌──────────────────────────────────────────────┐
+│  Headers / tabs              (~17% height)   │
+├──────────────────────────────────────────────┤
+│  Row  │ Rank badge │  Player name  │  ...    │
+│       │  R5/R4/…   │               │         │
+│  ...  │            │               │         │
+├──────────────────────────────────────────────┤
+│  Bottom UI                   (~10%)          │
+└──────────────────────────────────────────────┘
+```
+
+**Processing flow:**
+
+```
+importMemberScreenshot(imageData)
+    │
+    ├─ image.Decode() + analyzeScreenshot()
+    │
+    ├─ extractMembersByRows()         ← PRIMARY (row-based)
+    │      │
+    │      ├─ convertToGrayscale()
+    │      ├─ findRowBoundaries()
+    │      └─ per row:
+    │           ├─ crop full row width (rank badge text included)
+    │           ├─ scaleImage(3×) + OCR PSM_SINGLE_LINE
+    │           └─ collect line text → join with "\n"
+    │
+    ├─ quality gate: ≥2 R[1-5] tokens in combined text
+    │
+    ├─ full-image OCR fallback        ← preprocessImageForOCR → PSM_AUTO/BLOCK/SPARSE
+    │
+    └─ rank-regex parser
+           ├─ find R1–R5 tokens per line
+           ├─ strip power numbers, punctuation
+           ├─ fuzzy-match against DB members (Levenshtein similarity)
+           └─ return: detected, changed-rank, new, to-remove lists
+```
+
+---
+
+## Edge-Detection Helpers
+
+All three pipelines share four pure-Go helper functions defined in `main.go`:
+
+### `sobelMagnitude(gray *image.Gray, x, y int) uint8`
+Returns the Sobel gradient magnitude (L1 norm, clamped 0–255) at pixel `(x, y)`. Pixels outside image bounds are clamped to the nearest edge pixel.
+
+### `regionEdgeDensity(gray *image.Gray, x0, y0, x1, y1 int) float64`
+Mean Sobel magnitude over rectangle `[x0,x1) × [y0,y1)`. Range `[0.0, 255.0]`. Used to measure how "complex" (avatar) vs. "plain" (text background) a column slice is.
+
+### `findRowBoundaries(gray *image.Gray, top, bottom, minRowH int) [][2]int`
+Scans every horizontal scanline between `top` and `bottom`. A scanline is a **separator** if its pixel-brightness variance is below 30 (near-uniform colour) and mean brightness is below 245 (not pure white). Contiguous non-separator bands become rows. Returns `[][2]int` of `{rowTop, rowBottom}` pairs.
+
+Falls back to even division if no separators are found (e.g. screenshots without visible grid lines).
+
+### `detectAvatarEndX(gray *image.Gray, rowTop, rowBottom, maxAvatarX int) int`
+Slides a vertical window left-to-right across the row. When mean Sobel edge density first transitions from high (≥ 18, avatar artwork) to low (< 8, plain text background), that x position is returned as the avatar/text boundary. `maxAvatarX` is a hard cap so the detector never eats into the name column.
+
+---
+
+## Preprocessing Pipeline (full-image fallback)
+
+When row-based extraction returns too few records, the original full-image pipeline runs:
+
+| Step | Function | Purpose |
+|------|----------|---------|
+| 1 | `analyzeScreenshot` | Compute `DataRegion`, `RowHeight`, `EstimatedRows` |
+| 2 | `cropToDataRegion` | Remove title bar, tabs, headers, bottom button |
+| 3 | `convertToGrayscale` | Single colour channel |
+| 4 | `enhanceContrast` | Histogram equalisation |
+| 5 | `applyAdaptiveThreshold` | Local binarisation (block 25 px, or 15 px for dense rows) |
+| 6 | `invertImage` | Black text on white background for Tesseract |
+| 7 | `scaleImage` | 3× upscale via nearest-neighbour |
+
+---
+
+## Data Structures
+
+```go
+type ImageRegion struct {
+    Name   string
+    Top    int  // Y top edge
+    Bottom int  // Y bottom edge
+    Left   int  // X left edge
+    Right  int  // X right edge
+}
+
+type ScreenshotAttributes struct {
+    Width          int
+    Height         int
+    TitleBarRegion *ImageRegion
+    TabsRegion     *ImageRegion
+    HeaderRegion   *ImageRegion
+    DataRegion     *ImageRegion  // ← where player rows live
+    ButtonRegion   *ImageRegion
+    RowHeight      int           // estimated (used only as fallback)
+    EstimatedRows  int           // estimated (used only as fallback)
+}
+```
+
+---
+
+## Requirements
+
+### Production (Docker / Linux)
+```dockerfile
+# Alpine 3.21 — only English data required
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-eng
+```
+
+### Development (Windows)
+The preprocessing helpers use only Go stdlib and compile without CGO. The `gosseract` OCR client requires CGO + Tesseract C headers; build inside Docker for full functionality.
+
+### Go dependencies
+| Package | Purpose |
+|---------|---------|
+| `image`, `image/color`, `image/draw`, `image/png` | Image decode/encode/manipulation |
+| `bytes` | Buffer management |
+| `github.com/otiai10/gosseract/v2` | Tesseract OCR bindings (CGO) |
+
+---
+
+## Logging
+
+Each pipeline emits structured log lines for debugging:
+
+```
+VS OCR: edge detection found 10 rows in data region (was estimating 10)
+Row 1: Name='Reddy sri', Points=4812500
+Row 2: Name='rahuld', Points=3976200
+...
+Power OCR: row-based extraction succeeded with 10 records
+Power row 1: Name='Gary6126', Power=77421000
+...
+Members OCR: edge detection found 12 rows in data region
+Members row 1: "R4 CoolPlayer"
+Members row 2: "R3 AnotherOne"
+...
 
 ## Distinct Attributes Detected
 
