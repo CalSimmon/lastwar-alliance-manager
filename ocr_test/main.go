@@ -168,6 +168,39 @@ func parseVSPointsText(text string) []VSRecord {
 	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]*?)\s+` + numPat)
 	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+` + numPat)
 
+	// Matches a line whose last token is a large number (with optional garbage before it)
+	pointsOnlyPattern := regexp.MustCompile(`(?:^|[^A-Za-z])` + numPat + `\s*$`)
+
+	extractNumber := func(line string) (int64, bool) {
+		m := pointsOnlyPattern.FindStringSubmatch(line)
+		if len(m) < 2 {
+			return 0, false
+		}
+		s := regexp.MustCompile(`[^0-9]`).ReplaceAllString(m[1], "")
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || v < 10000 || v > 999999999 {
+			return 0, false
+		}
+		return v, true
+	}
+
+	isNameLike := func(line string) bool {
+		if len(line) < 3 || len(line) > 35 {
+			return false
+		}
+		if !regexp.MustCompile(`^[A-Za-z]`).MatchString(line) {
+			return false
+		}
+		lower := strings.ToLower(line)
+		for _, skip := range []string{"ranking", "commander", "points", "daily rank",
+			"weekly rank", "your alliance", "nova sapphire", "reset reapers"} {
+			if strings.Contains(lower, skip) {
+				return false
+			}
+		}
+		return true
+	}
+
 	whitespaceRe := regexp.MustCompile(`\s+`)
 	nonDigitRe := regexp.MustCompile(`[^0-9]`)
 	skipLineRe := regexp.MustCompile(`^[0-9]{1,3}\.?$`)
@@ -175,6 +208,25 @@ func parseVSPointsText(text string) []VSRecord {
 
 	seenNames := make(map[string]bool)
 
+	cleanPlayerName := func(name string) string {
+		name = strings.ReplaceAll(name, "|", "I")
+		re := regexp.MustCompile(`\[.*?\]|\(.*?\)`)
+		name = re.ReplaceAllString(name, "")
+		re2 := regexp.MustCompile(`^\d+\)?\s*`)
+		name = re2.ReplaceAllString(name, "")
+		return strings.TrimSpace(name)
+	}
+
+	addRecord := func(name string, points int64) {
+		name = whitespaceRe.ReplaceAllString(strings.TrimSpace(name), " ")
+		if len(name) >= 3 && len(name) <= 30 && !seenNames[name] &&
+			points >= 10000 && points <= 999999999 {
+			records = append(records, VSRecord{MemberName: name, Points: points})
+			seenNames[name] = true
+		}
+	}
+
+	// ── Pass 1: same-line patterns ─────────────────────────────────────────
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || len(line) < 5 || skipLineRe.MatchString(line) {
@@ -187,7 +239,6 @@ func parseVSPointsText(text string) []VSRecord {
 			dayRe.MatchString(lowerLine) {
 			continue
 		}
-
 		var matches []string
 		matches = rankPrefixPattern.FindStringSubmatch(line)
 		if len(matches) == 0 {
@@ -199,21 +250,83 @@ func parseVSPointsText(text string) []VSRecord {
 		if len(matches) == 0 {
 			matches = simplePattern.FindStringSubmatch(line)
 		}
-
-		if len(matches) < 3 {
-			fmt.Printf("  [no match] %q\n", line)
-			continue
+		if len(matches) >= 3 {
+			name := strings.TrimSpace(matches[1])
+			// Reject garbled OCR false positives: the matched name must contain
+			// at least one word of length ≥ 3 (filters "B P ii", "ke i", etc.)
+			hasLongWord := false
+			for _, w := range whitespaceRe.Split(name, -1) {
+				if len(w) >= 3 {
+					hasLongWord = true
+					break
+				}
+			}
+			if !hasLongWord {
+				continue
+			}
+			pointsStr := nonDigitRe.ReplaceAllString(strings.ReplaceAll(matches[2], ",", ""), "")
+			points, err := strconv.ParseInt(pointsStr, 10, 64)
+			if err == nil {
+				addRecord(name, points)
+			}
 		}
-
-		name := whitespaceRe.ReplaceAllString(strings.TrimSpace(matches[1]), " ")
-		pointsStr := nonDigitRe.ReplaceAllString(strings.ReplaceAll(matches[2], ",", ""), "")
-		points, err := strconv.ParseInt(pointsStr, 10, 64)
-		if err != nil || points < 10000 || points > 999999999 || len(name) < 4 || len(name) > 30 || seenNames[name] {
-			continue
-		}
-		records = append(records, VSRecord{MemberName: name, Points: points})
-		seenNames[name] = true
 	}
+
+	// ── Pass 2: multi-line scan ────────────────────────────────────────────
+	// For full-image OCR where name and points appear on adjacent lines.
+	//
+	// Walk each line right-to-left collecting consecutive "clean" tokens
+	// (all-alphanumeric, length ≥ 3) as the candidate name.  Stop as soon
+	// as a token is < 3 chars or contains non-alphanumeric characters —
+	// that boundary separates the real trailing name from leading garbage.
+	//
+	//   "| =y B Bl Reddy sri"  → stops at "Bl"(2) → candidate = "Reddy sri"
+	//   "L= > Al rahuld"       → stops at "Al"(2)  → candidate = "rahuld"
+	//   "s i Patrick"          → stops at "i"(1)   → candidate = "Patrick"
+	//   "&Y COL Geo222"        → stops at "&Y"(!)  → candidate = "COL Geo222"
+	//   "CAIOVLF"              → full line          → candidate = "CAIOVLF"
+	if len(records) < 3 {
+		cleanWordRe := regexp.MustCompile(`^[A-Za-z0-9]+$`)
+
+		extractSuffix := func(line string) string {
+			parts := whitespaceRe.Split(strings.TrimSpace(line), -1)
+			var nameParts []string
+			for i := len(parts) - 1; i >= 0; i-- {
+				w := parts[i]
+				if len(w) < 3 || !cleanWordRe.MatchString(w) {
+					break
+				}
+				nameParts = append([]string{w}, nameParts...)
+			}
+			return strings.Join(nameParts, " ")
+		}
+
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			candidateName := extractSuffix(line)
+			if !isNameLike(candidateName) || seenNames[candidateName] {
+				continue
+			}
+			for j := i + 1; j <= i+3 && j < len(lines); j++ {
+				nextLine := strings.TrimSpace(lines[j])
+				if nextLine == "" {
+					continue
+				}
+				pts, ok := extractNumber(nextLine)
+				if ok {
+					cleanName := cleanPlayerName(candidateName)
+					if cleanName != "" {
+						addRecord(cleanName, pts)
+					}
+					break
+				}
+			}
+		}
+	}
+
 	return records
 }
 
@@ -367,6 +480,40 @@ Ranking Commander Points
 			{"Fighter Davo", 9369070},
 			{"AmishKTJ", 8801750},
 			{"Orlzie", 7411550},
+		},
+	)
+
+	// --- Real full-image OCR output from the failing screenshot ---
+	// This is the EXACT text Tesseract returned (name and points on separate lines,
+	// with avatar/rank garbage on each line before the real content).
+	runVSTest("VS full-image OCR garbled multiline (real failure case)",
+		`Ranking Commander Points
+| =y B Bl Reddy sri
+ﬂ T ) 160,689,845
+= = [NvSP] Nova Sapphire
+L= > Al rahuld
+3 'i 111,493,155
+— Al 5| [NvSP] Nova Sapphire
+s i Patrick
+&) &\ 106,532,361
+. 2] [NvSP] Nova Sapphire
+€7 Al Bandita2291
+(A PN . 78,909,372
+Jaid" | [NvSP] Nova Sapphire
+&Y COL Geo222
+B P ii _ 72,463,018
+' | [NvSP] Nova Sapphire
+J'i:} mEm__._ s
+CAIOVLF
+c) ke i 9,309,500
+[NvSP]Nova Sapphire`,
+		[]VSRecord{
+			{"Reddy sri", 160689845},
+			{"rahuld", 111493155},
+			{"Patrick", 106532361},
+			{"Bandita2291", 78909372},
+			{"COL Geo222", 72463018},
+			{"CAIOVLF", 9309500},
 		},
 	)
 }

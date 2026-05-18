@@ -7035,10 +7035,9 @@ func detectDayByColor(img image.Image) string {
 				// Convert from 16-bit to 8-bit color
 				r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
 
-				// White/cream/light background detection
-				// Selected tab has light background (RGB > 200)
-				// Unselected tabs are gray/dark (RGB < 180)
-				if r8 > 200 && g8 > 200 && b8 > 200 {
+				// Selected tab has a WHITE/cream background (all channels > 220).
+				// Unselected tabs are medium gray (~145-165) which won't pass this threshold.
+				if r8 > 220 && g8 > 220 && b8 > 220 {
 					lightCount++
 				}
 			}
@@ -7046,7 +7045,8 @@ func detectDayByColor(img image.Image) string {
 		lightCounts[dayIdx] = lightCount
 	}
 
-	// Find the day with the most light pixels
+	// Find the day with the most light pixels.
+	// The selected tab should have significantly more white pixels than any unselected tab.
 	maxLight := 0
 	selectedDay := -1
 	for i, count := range lightCounts {
@@ -7057,7 +7057,7 @@ func detectDayByColor(img image.Image) string {
 	}
 
 	// Require a minimum threshold to avoid false positives
-	minThreshold := 100 // At least 100 light pixels
+	minThreshold := 50 // At least 50 bright pixels in the selected tab region
 	if selectedDay >= 0 && maxLight > minThreshold {
 		log.Printf("Day detected by color: %s (light pixel count: %d)", days[selectedDay], maxLight)
 		log.Printf("Color counts per day: Mon=%d, Tue=%d, Wed=%d, Thu=%d, Fri=%d, Sat=%d",
@@ -7085,10 +7085,15 @@ func detectDayFromTabRegion(imageData []byte) string {
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// The tab region is approximately at y=220-290 pixels from the top
-	// Adjust based on image size
-	tabTop := int(float64(height) * 0.08)     // ~8% from top
-	tabBottom := int(float64(height) * 0.105) // ~10.5% from top
+	// The Mon-Sat day-tab row sits below the "Daily Rank / Weekly Rank" switcher.
+	// Layout (approximate % of image height):
+	//   0-6%   RANKING title bar
+	//   7-12%  Daily Rank / Weekly Rank switcher tabs
+	//  13-19%  Mon. Tues. Wed. Thur. Fri. Sat. day-selector tabs  ← target
+	//  19-21%  Column-header row (Ranking | Commander | Points)
+	//  21-92%  Data rows
+	tabTop := int(float64(height) * 0.13)
+	tabBottom := int(float64(height) * 0.19)
 
 	// Ensure we don't go out of bounds
 	if tabTop < 0 {
@@ -7209,8 +7214,33 @@ func extractVSPointsDataFromImage(imageData []byte) (day string, records []struc
 	log.Printf("Attempting row-by-row segmented OCR...")
 	records, err = extractVSPointsByRows(img, attrs)
 
-	if err != nil || len(records) == 0 {
-		log.Printf("Segmented OCR failed (%v), falling back to full image OCR", err)
+	// Validate row-based results: reject if any name contains a newline or a
+	// known UI label (header row leaked in, alliance text, etc.)
+	rowResultsValid := err == nil && len(records) >= 3
+	if rowResultsValid {
+		uiLabels := []string{"commander", "ranking", "points", "nova sapphire", "reset reapers"}
+		for _, r := range records {
+			name := strings.ToLower(r.MemberName)
+			if strings.ContainsRune(r.MemberName, '\n') || strings.ContainsRune(r.MemberName, '\r') {
+				log.Printf("Row OCR quality check: name %q contains newline — discarding row results", r.MemberName)
+				rowResultsValid = false
+				break
+			}
+			for _, label := range uiLabels {
+				if strings.Contains(name, label) {
+					log.Printf("Row OCR quality check: name %q matches UI label %q — discarding row results", r.MemberName, label)
+					rowResultsValid = false
+					break
+				}
+			}
+			if !rowResultsValid {
+				break
+			}
+		}
+	}
+
+	if !rowResultsValid {
+		log.Printf("Segmented OCR failed or produced invalid results (%v), falling back to full image OCR", err)
 		// Fallback to original full-image OCR approach
 		records, err = extractVSPointsFullImage(imageData, attrs)
 		if err != nil {
@@ -7284,31 +7314,41 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 			break
 		}
 
-		// Extract this row as a separate image
-		rowImg := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), rowBottom-rowTop))
-		draw.Draw(rowImg, rowImg.Bounds(), img, image.Point{0, rowTop}, draw.Src)
+		rowH := rowBottom - rowTop
+		rowW := bounds.Dx()
 
-		// Process this row
-		// Split row into segments: rank (15%), name (50%), points (35%)
-		rankWidth := bounds.Dx() * 15 / 100
-		nameStart := rankWidth
-		nameWidth := bounds.Dx() * 50 / 100
-		pointsStart := nameStart + nameWidth
+		// === Layout of each row in the VS ranking screenshot ===
+		//
+		//  |<-- 0-28% rank+avatar -->|<---- 28-70% name (top) / alliance (bottom) --->|<-- 70-100% points -->|
+		//
+		// The player name appears in the TOP ~55% of the row.
+		// The alliance tag appears in the BOTTOM ~45% of the row.
+		// The points number is on the RIGHT and vertically centered in the full row.
+		//
+		// To avoid the alliance tag contaminating the points OCR, we use digits-only
+		// mode and strip all non-digit characters from the points result.
+		// For the name, we only OCR the top 55% of the row to skip the alliance tag.
 
-		// Extract name segment
-		nameImg := image.NewRGBA(image.Rect(0, 0, nameWidth, rowBottom-rowTop))
-		draw.Draw(nameImg, nameImg.Bounds(), rowImg, image.Point{nameStart, 0}, draw.Src)
+		nameTopH := rowH * 55 / 100 // upper portion containing the player name
 
-		// Extract points segment
-		pointsWidth := bounds.Dx() - pointsStart
-		pointsImg := image.NewRGBA(image.Rect(0, 0, pointsWidth, rowBottom-rowTop))
-		draw.Draw(pointsImg, pointsImg.Bounds(), rowImg, image.Point{pointsStart, 0}, draw.Src)
+		// Column boundaries
+		nameStartX := rowW * 28 / 100
+		nameEndX := rowW * 70 / 100
+		pointsStartX := rowW * 70 / 100
 
-		// Scale 2x and convert to grayscale for better OCR
-		scaledName := scaleImage(nameImg, 2)
+		// Extract name region: x[28%..70%], y[0..55%]
+		nameImg := image.NewRGBA(image.Rect(0, 0, nameEndX-nameStartX, nameTopH))
+		draw.Draw(nameImg, nameImg.Bounds(), img, image.Point{nameStartX, rowTop}, draw.Src)
+
+		// Extract points region: x[70%..100%], y[0..100%]
+		pointsImg := image.NewRGBA(image.Rect(0, 0, rowW-pointsStartX, rowH))
+		draw.Draw(pointsImg, pointsImg.Bounds(), img, image.Point{pointsStartX, rowTop}, draw.Src)
+
+		// Scale 3x for better OCR accuracy on small text
+		scaledName := scaleImage(nameImg, 3)
 		grayName := convertToGrayscale(scaledName)
 
-		scaledPoints := scaleImage(pointsImg, 2)
+		scaledPoints := scaleImage(pointsImg, 3)
 		grayPoints := convertToGrayscale(scaledPoints)
 
 		// OCR the name segment
@@ -7327,7 +7367,7 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 			continue // Skip empty rows
 		}
 
-		// OCR the points segment
+		// OCR the points segment — digits only to eliminate any text contamination
 		var pointsBuf bytes.Buffer
 		if err := png.Encode(&pointsBuf, grayPoints); err != nil {
 			log.Printf("Row %d: Failed to encode points segment: %v", i+1, err)
@@ -7337,6 +7377,8 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 		pointsClient := gosseract.NewClient()
 		defer pointsClient.Close()
 		pointsClient.SetImageFromBytes(pointsBuf.Bytes())
+		// Digits-only whitelist eliminates all alphabetic OCR noise
+		pointsClient.SetVariable("tessedit_char_whitelist", "0123456789,")
 		pointsClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
 		pointsText, err := pointsClient.Text()
 		if err != nil || len(strings.TrimSpace(pointsText)) == 0 {
@@ -7346,22 +7388,19 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 
 		// Parse the extracted text
 		name := strings.TrimSpace(nameText)
-		// Clean up name (remove alliance tags, rank numbers, etc.)
 		name = cleanPlayerName(name)
 
-		// Parse points
-		pointsStr := strings.TrimSpace(pointsText)
-		pointsStr = strings.ReplaceAll(pointsStr, ",", "")
-		pointsStr = strings.ReplaceAll(pointsStr, ".", "")
-		pointsStr = strings.ReplaceAll(pointsStr, " ", "")
+		// Strip anything that isn't a digit (belt-and-suspenders after the whitelist)
+		nonDigitRe := regexp.MustCompile(`[^0-9]`)
+		pointsStr := nonDigitRe.ReplaceAllString(strings.TrimSpace(pointsText), "")
 
 		points, err := strconv.ParseInt(pointsStr, 10, 64)
 		if err != nil {
-			log.Printf("Row %d: Failed to parse points '%s': %v", i+1, pointsStr, err)
+			log.Printf("Row %d: Failed to parse points '%s' (raw: '%s'): %v", i+1, pointsStr, strings.TrimSpace(pointsText), err)
 			continue
 		}
 
-		if points < 100 { // Sanity check
+		if points < 1000 { // Sanity check — skip header row or near-zero noise
 			continue
 		}
 
@@ -7525,19 +7564,54 @@ func parseVSPointsText(text string) []struct {
 	// Number pattern: plain 6+ digits OR comma-formatted (19,291,992)
 	numPat := `([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{6,})`
 
-	// Pattern 1: leading rank digit + name + optional alliance tag + number
-	// "1 Malata90 [RSRP] Reset Reapers 48,898,988"
+	// Pattern 1: leading rank digit + name + optional alliance tag + number (all on one line)
 	rankPrefixPattern := regexp.MustCompile(`^[0-9]{1,3}\s+([A-Za-z][A-Za-z0-9_\s]+?)\s+(?:\[[^\]]*\][^0-9]*)?\s*` + numPat)
 
-	// Pattern 2: name then alliance tag then number
-	// "Gone Quixote [RSRP] Reset Reapers 22,222,922"
+	// Pattern 2: name then alliance tag then number (all on one line)
 	alliancePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+\[[^\]]*\][^0-9]*` + numPat)
 
-	// Pattern 3: optional R-badge prefix, name, number
+	// Pattern 3: optional R-badge prefix, name, number (all on one line)
 	rankPattern := regexp.MustCompile(`(?:R[0-9]\s+)?([A-Za-z][A-Za-z0-9_\s]*?)\s+` + numPat)
 
-	// Pattern 4: simple name + number
+	// Pattern 4: simple name + number (all on one line)
 	simplePattern := regexp.MustCompile(`([A-Za-z][A-Za-z0-9_\s]+?)\s+` + numPat)
+
+	// Pattern to detect a line that contains only a number (possibly with OCR garbage before it)
+	pointsOnlyPattern := regexp.MustCompile(`(?:^|[^A-Za-z])` + numPat + `\s*$`)
+
+	// Helper to extract a plain number from a noisy line
+	// e.g. "ﬂ T ) 160,689,845" → 160689845
+	extractNumber := func(line string) (int64, bool) {
+		m := pointsOnlyPattern.FindStringSubmatch(line)
+		if len(m) < 2 {
+			return 0, false
+		}
+		s := regexp.MustCompile(`[^0-9]`).ReplaceAllString(m[1], "")
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || v < 10000 || v > 999999999 {
+			return 0, false
+		}
+		return v, true
+	}
+
+	// Helper: does a line look like a player name (starts with a letter, length 3-25,
+	// no big numbers, not a pure UI label)?
+	isNameLike := func(line string) bool {
+		if len(line) < 3 || len(line) > 35 {
+			return false
+		}
+		if !regexp.MustCompile(`^[A-Za-z]`).MatchString(line) {
+			return false
+		}
+		lower := strings.ToLower(line)
+		for _, skip := range []string{"ranking", "commander", "points", "daily rank",
+			"weekly rank", "your alliance", "nova sapphire", "reset reapers"} {
+			if strings.Contains(lower, skip) {
+				return false
+			}
+		}
+		return true
+	}
 
 	// Pre-compiled helpers
 	whitespaceRe := regexp.MustCompile(`\s+`)
@@ -7548,31 +7622,35 @@ func parseVSPointsText(text string) []struct {
 	// Track seen names to avoid duplicates
 	seenNames := make(map[string]bool)
 
+	addRecord := func(name string, points int64) {
+		name = whitespaceRe.ReplaceAllString(strings.TrimSpace(name), " ")
+		if len(name) >= 3 && len(name) <= 30 && !seenNames[name] &&
+			points >= 10000 && points <= 999999999 {
+			records = append(records, struct {
+				MemberName string `json:"member_name"`
+				Points     int64  `json:"points"`
+			}{MemberName: name, Points: points})
+			seenNames[name] = true
+			log.Printf("Parsed VS points: %s -> %d", name, points)
+		}
+	}
+
+	// ── Pass 1: same-line patterns (handles clean/manual input) ──────────────
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || len(line) < 5 || skipLineRe.MatchString(line) {
 			continue
 		}
-
-		// Skip lines that are clearly UI elements or bare rank numbers
-		if len(line) < 5 || skipLineRe.MatchString(line) {
-			continue
-		}
-
-		// Skip common UI text
 		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, "ranking") ||
-			strings.Contains(lowerLine, "commander") ||
-			strings.Contains(lowerLine, "points") ||
-			strings.Contains(lowerLine, "daily rank") ||
-			strings.Contains(lowerLine, "weekly rank") ||
-			strings.Contains(lowerLine, "your alliance") ||
+		if strings.Contains(lowerLine, "ranking") || strings.Contains(lowerLine, "commander") ||
+			strings.Contains(lowerLine, "points") || strings.Contains(lowerLine, "daily rank") ||
+			strings.Contains(lowerLine, "weekly rank") || strings.Contains(lowerLine, "your alliance") ||
 			dayRe.MatchString(lowerLine) {
 			continue
 		}
 
-		// Try patterns in priority order
-		matches := rankPrefixPattern.FindStringSubmatch(line)
+		var matches []string
+		matches = rankPrefixPattern.FindStringSubmatch(line)
 		if len(matches) == 0 {
 			matches = alliancePattern.FindStringSubmatch(line)
 		}
@@ -7585,25 +7663,76 @@ func parseVSPointsText(text string) []struct {
 
 		if len(matches) >= 3 {
 			name := strings.TrimSpace(matches[1])
-			name = whitespaceRe.ReplaceAllString(name, " ")
-
-			pointsStr := strings.ReplaceAll(matches[2], ",", "")
-			pointsStr = nonDigitRe.ReplaceAllString(pointsStr, "")
-
+			// Reject garbled OCR false positives: the matched name must contain
+			// at least one word of length ≥ 3 (filters "B P ii", "ke i", etc.)
+			hasLongWord := false
+			for _, w := range whitespaceRe.Split(name, -1) {
+				if len(w) >= 3 {
+					hasLongWord = true
+					break
+				}
+			}
+			if !hasLongWord {
+				continue
+			}
+			pointsStr := nonDigitRe.ReplaceAllString(strings.ReplaceAll(matches[2], ",", ""), "")
 			points, err := strconv.ParseInt(pointsStr, 10, 64)
+			if err == nil {
+				addRecord(name, points)
+			}
+		}
+	}
 
-			// Validate: points realistic range, name length reasonable
-			if err == nil && points >= 10000 && points <= 999999999 &&
-				len(name) >= 4 && len(name) <= 30 && !seenNames[name] {
-				records = append(records, struct {
-					MemberName string `json:"member_name"`
-					Points     int64  `json:"points"`
-				}{
-					MemberName: name,
-					Points:     points,
-				})
-				seenNames[name] = true
-				log.Printf("Parsed VS points: %s -> %d", name, points)
+	// ── Pass 2: multi-line scan ────────────────────────────────────────────
+	// For full-image OCR where name and points appear on adjacent lines.
+	//
+	// Walk each line right-to-left collecting consecutive "clean" tokens
+	// (all-alphanumeric, length ≥ 3) as the candidate name.  Stop as soon
+	// as a token is < 3 chars or contains non-alphanumeric characters.
+	//
+	//   "| =y B Bl Reddy sri"  → stops at "Bl"(2) → candidate = "Reddy sri"
+	//   "L= > Al rahuld"       → stops at "Al"(2)  → candidate = "rahuld"
+	//   "s i Patrick"          → stops at "i"(1)   → candidate = "Patrick"
+	//   "&Y COL Geo222"        → stops at "&Y"(!)  → candidate = "COL Geo222"
+	//   "CAIOVLF"              → full line          → candidate = "CAIOVLF"
+	if len(records) < 3 {
+		cleanWordRe := regexp.MustCompile(`^[A-Za-z0-9]+$`)
+
+		extractSuffix := func(line string) string {
+			parts := whitespaceRe.Split(strings.TrimSpace(line), -1)
+			var nameParts []string
+			for i := len(parts) - 1; i >= 0; i-- {
+				w := parts[i]
+				if len(w) < 3 || !cleanWordRe.MatchString(w) {
+					break
+				}
+				nameParts = append([]string{w}, nameParts...)
+			}
+			return strings.Join(nameParts, " ")
+		}
+
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			candidateName := extractSuffix(line)
+			if !isNameLike(candidateName) || seenNames[candidateName] {
+				continue
+			}
+			for j := i + 1; j <= i+3 && j < len(lines); j++ {
+				nextLine := strings.TrimSpace(lines[j])
+				if nextLine == "" {
+					continue
+				}
+				pts, ok := extractNumber(nextLine)
+				if ok {
+					cleanName := cleanPlayerName(candidateName)
+					if cleanName != "" {
+						addRecord(cleanName, pts)
+					}
+					break
+				}
 			}
 		}
 	}
