@@ -6131,27 +6131,42 @@ func importMemberScreenshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Preprocess and OCR
-	processedData, err := preprocessImageForOCR(imageData)
-	if err != nil {
-		log.Printf("Image preprocessing failed: %v, using original", err)
-		processedData = imageData
-	}
-
-	client := gosseract.NewClient()
-	defer client.Close()
-
-	if err := client.SetImageFromBytes(processedData); err != nil {
-		http.Error(w, "Failed to load image for OCR", http.StatusInternalServerError)
-		return
-	}
-
+	// ── Attempt 1: row-based OCR using edge detection ─────────────────────────
 	var ocrText string
-	for _, mode := range []gosseract.PageSegMode{gosseract.PSM_AUTO, gosseract.PSM_SINGLE_BLOCK, gosseract.PSM_SPARSE_TEXT} {
-		client.SetPageSegMode(mode)
-		if t, err := client.Text(); err == nil && len(strings.TrimSpace(t)) > 0 {
-			ocrText = t
-			break
+	if decodedImg, _, decodeErr := image.Decode(bytes.NewReader(imageData)); decodeErr == nil {
+		memberAttrs := analyzeScreenshot(decodedImg)
+		if rowText, rowErr := extractMembersByRows(decodedImg, memberAttrs); rowErr == nil {
+			rankCountRe := regexp.MustCompile(`(?i)\bR[1-5]\b`)
+			if len(rankCountRe.FindAllString(rowText, -1)) >= 2 {
+				ocrText = rowText
+				log.Printf("Members OCR: using row-based text (%d rank tokens)", len(rankCountRe.FindAllString(rowText, -1)))
+			}
+		}
+	}
+
+	// ── Attempt 2: full-image OCR (original method) ────────────────────────────
+	if ocrText == "" {
+		// Preprocess and OCR
+		processedData, err := preprocessImageForOCR(imageData)
+		if err != nil {
+			log.Printf("Image preprocessing failed: %v, using original", err)
+			processedData = imageData
+		}
+
+		client := gosseract.NewClient()
+		defer client.Close()
+
+		if err := client.SetImageFromBytes(processedData); err != nil {
+			http.Error(w, "Failed to load image for OCR", http.StatusInternalServerError)
+			return
+		}
+
+		for _, mode := range []gosseract.PageSegMode{gosseract.PSM_AUTO, gosseract.PSM_SINGLE_BLOCK, gosseract.PSM_SPARSE_TEXT} {
+			client.SetPageSegMode(mode)
+			if t, err := client.Text(); err == nil && len(strings.TrimSpace(t)) > 0 {
+				ocrText = t
+				break
+			}
 		}
 	}
 
@@ -6257,6 +6272,66 @@ func importMemberScreenshot(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// extractMembersByRows segments the member-list screenshot into individual rows
+// and OCRs each row with PSM_SINGLE_LINE for cleaner rank-badge + name extraction.
+//
+// Returns a synthetic multi-line string where each line is the OCR output of one
+// row.  The existing rank-regex parser in importMemberScreenshot consumes this
+// directly, so the parsing logic is unchanged.
+func extractMembersByRows(img image.Image, attrs *ScreenshotAttributes) (string, error) {
+	bounds := img.Bounds()
+	imgW := bounds.Dx()
+	dataRegion := attrs.DataRegion
+
+	grayFull := convertToGrayscale(img)
+
+	const minRowH = 30
+	rowBounds := findRowBoundaries(grayFull, dataRegion.Top, dataRegion.Bottom, minRowH)
+
+	log.Printf("Members OCR: edge detection found %d rows in data region", len(rowBounds))
+
+	var lines []string
+	for i, rb := range rowBounds {
+		rowTop, rowBottom := rb[0], rb[1]
+		rowH := rowBottom - rowTop
+		if rowH < minRowH {
+			continue
+		}
+
+		// OCR the full row width — we want the rank badge text (R4, R3, …) which
+		// appears as text at the left side of each row alongside the player name.
+		rowImg := image.NewRGBA(image.Rect(0, 0, imgW, rowH))
+		draw.Draw(rowImg, rowImg.Bounds(), img, image.Point{bounds.Min.X, rowTop}, draw.Src)
+
+		scaled := scaleImage(rowImg, 3)
+		gray := convertToGrayscale(scaled)
+
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, gray); err != nil {
+			log.Printf("Members row %d: encode failed: %v", i+1, err)
+			continue
+		}
+
+		client := gosseract.NewClient()
+		defer client.Close()
+		client.SetImageFromBytes(buf.Bytes())
+		client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+		text, err := client.Text()
+		if err != nil || len(strings.TrimSpace(text)) == 0 {
+			continue
+		}
+		text = strings.TrimSpace(text)
+		log.Printf("Members row %d: %q", i+1, text)
+		lines = append(lines, text)
+	}
+
+	if len(lines) == 0 {
+		return "", fmt.Errorf("no member rows extracted")
+	}
+
+	return strings.Join(lines, "\n"), nil
 }
 
 // Auto-register a list of player names as R1 members (for unmatched OCR results)
@@ -6710,6 +6785,208 @@ func invertImage(img *image.Gray) *image.Gray {
 	return inverted
 }
 
+// ── Edge-detection helpers ────────────────────────────────────────────────────
+//
+// These are used by all three OCR upload pipelines to:
+//   1. Find exact row boundaries  (findRowBoundaries)
+//   2. Locate the avatar/graphic column end  (detectAvatarEndX)
+//
+// Only Go stdlib is required — no OpenCV or external library.
+
+// sobelMagnitude returns the Sobel gradient magnitude (0-255) at pixel (x,y)
+// using a 3×3 kernel.  Pixels outside the image bounds are clamped to edge.
+func sobelMagnitude(gray *image.Gray, x, y int) uint8 {
+	b := gray.Bounds()
+	clamp := func(v, lo, hi int) int {
+		if v < lo {
+			return lo
+		}
+		if v > hi {
+			return hi
+		}
+		return v
+	}
+	px := func(dx, dy int) int {
+		return int(gray.GrayAt(clamp(x+dx, b.Min.X, b.Max.X-1), clamp(y+dy, b.Min.Y, b.Max.Y-1)).Y)
+	}
+	gx := -px(-1, -1) - 2*px(-1, 0) - px(-1, 1) + px(1, -1) + 2*px(1, 0) + px(1, 1)
+	gy := -px(-1, -1) - 2*px(0, -1) - px(1, -1) + px(-1, 1) + 2*px(0, 1) + px(1, 1)
+	mag := gx*gx + gy*gy
+	// Fast integer sqrt via lookup; cap at 255
+	if mag <= 0 {
+		return 0
+	}
+	// approximate: mag = |gx|+|gy| (L1 norm, faster, good enough for thresholding)
+	l1 := gx
+	if l1 < 0 {
+		l1 = -l1
+	}
+	abs_gy := gy
+	if abs_gy < 0 {
+		abs_gy = -abs_gy
+	}
+	l1 += abs_gy
+	if l1 > 255*4 {
+		return 255
+	}
+	return uint8(l1 / 4)
+}
+
+// regionEdgeDensity returns the mean Sobel magnitude (0.0–255.0) over the
+// rectangle [x0,x1) × [y0,y1) of a grayscale image.
+// Returns 0 if the rectangle is empty.
+func regionEdgeDensity(gray *image.Gray, x0, y0, x1, y1 int) float64 {
+	b := gray.Bounds()
+	if x0 < b.Min.X {
+		x0 = b.Min.X
+	}
+	if y0 < b.Min.Y {
+		y0 = b.Min.Y
+	}
+	if x1 > b.Max.X {
+		x1 = b.Max.X
+	}
+	if y1 > b.Max.Y {
+		y1 = b.Max.Y
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return 0
+	}
+	var sum int64
+	for row := y0; row < y1; row++ {
+		for col := x0; col < x1; col++ {
+			sum += int64(sobelMagnitude(gray, col, row))
+		}
+	}
+	n := int64((x1 - x0) * (y1 - y0))
+	return float64(sum) / float64(n)
+}
+
+// findRowBoundaries scans the grayscale image between y=top and y=bottom,
+// returning the y-coordinates (top edges) of each detected data row.
+//
+// Strategy: a separator line between rows is a horizontal band where almost
+// every pixel has nearly the same brightness (variance < threshold).  We scan
+// every row and mark "separator" rows, then collect the gaps between them as
+// individual data rows.
+//
+// minRowH is the minimum acceptable row height in pixels; rows thinner than
+// this are merged with their neighbour.
+func findRowBoundaries(gray *image.Gray, top, bottom, minRowH int) [][2]int {
+	b := gray.Bounds()
+	if top < b.Min.Y {
+		top = b.Min.Y
+	}
+	if bottom > b.Max.Y {
+		bottom = b.Max.Y
+	}
+	if bottom-top < minRowH {
+		return [][2]int{{top, bottom}}
+	}
+
+	width := b.Max.X - b.Min.X
+
+	// For each scanline, compute the variance of pixel brightnesses.
+	// A separator line has very low variance (solid colour).
+	isSep := make([]bool, bottom-top)
+	for y := top; y < bottom; y++ {
+		var sum, sumSq int64
+		for x := b.Min.X; x < b.Max.X; x++ {
+			v := int64(gray.GrayAt(x, y).Y)
+			sum += v
+			sumSq += v * v
+		}
+		n := int64(width)
+		mean := sum / n
+		variance := sumSq/n - mean*mean
+		// separator: very uniform (variance < 30) and not pure white (mean < 245)
+		isSep[y-top] = variance < 30 && mean < 245
+	}
+
+	// Collect contiguous non-separator bands as rows
+	var rows [][2]int
+	inRow := false
+	rowStart := 0
+	for i, sep := range isSep {
+		if !sep && !inRow {
+			inRow = true
+			rowStart = top + i
+		} else if sep && inRow {
+			h := top + i - rowStart
+			if h >= minRowH {
+				rows = append(rows, [2]int{rowStart, top + i})
+			}
+			inRow = false
+		}
+	}
+	if inRow {
+		h := bottom - rowStart
+		if h >= minRowH {
+			rows = append(rows, [2]int{rowStart, bottom})
+		}
+	}
+
+	// Fallback: if no separators found, divide evenly
+	if len(rows) == 0 {
+		estimatedRows := (bottom - top) / max(minRowH, 1)
+		if estimatedRows < 1 {
+			estimatedRows = 1
+		}
+		rowH := (bottom - top) / estimatedRows
+		for i := 0; i < estimatedRows; i++ {
+			t := top + i*rowH
+			rows = append(rows, [2]int{t, t + rowH})
+		}
+	}
+
+	return rows
+}
+
+// detectAvatarEndX scans the row band [rowTop, rowBottom) left-to-right and
+// returns the x coordinate where the avatar/graphic region ends.
+//
+// Avatars are complex artwork: high Sobel edge density.
+// Text backgrounds are plain: low edge density.
+//
+// The scan uses a sliding vertical window of width windowW.  It returns the x
+// where mean edge density in the window first drops below lowThresh after
+// having been above highThresh (i.e. we've crossed from graphic → text).
+//
+// maxAvatarX is a hard cap (e.g. image width * 40 / 100) so the result is
+// never unreasonably wide.  Returns maxAvatarX if no transition is found.
+func detectAvatarEndX(gray *image.Gray, rowTop, rowBottom, maxAvatarX int) int {
+	b := gray.Bounds()
+	if rowTop < b.Min.Y {
+		rowTop = b.Min.Y
+	}
+	if rowBottom > b.Max.Y {
+		rowBottom = b.Max.Y
+	}
+	if rowBottom <= rowTop {
+		return maxAvatarX
+	}
+
+	windowW := max((rowBottom-rowTop)/4, 4) // window width proportional to row height
+	highThresh := 18.0                       // edge density considered "graphic"
+	lowThresh := 8.0                         // edge density considered "text/plain"
+
+	seenHigh := false
+	for x := b.Min.X; x+windowW <= maxAvatarX; x += windowW / 2 {
+		density := regionEdgeDensity(gray, x, rowTop, x+windowW, rowBottom)
+		if density >= highThresh {
+			seenHigh = true
+		} else if seenHigh && density < lowThresh {
+			// transition: graphic → plain — return the centre of the window
+			result := x + windowW/2
+			if result > maxAvatarX {
+				return maxAvatarX
+			}
+			return result
+		}
+	}
+	return maxAvatarX
+}
+
 // Scale image up for better OCR
 func scaleImage(img image.Image, factor int) image.Image {
 	bounds := img.Bounds()
@@ -6779,6 +7056,19 @@ func extractPowerDataFromImage(imageData []byte) ([]struct {
 	MemberName string `json:"member_name"`
 	Power      int64  `json:"power"`
 }, error) {
+	// ── Attempt 1: row-based extraction using edge detection ──────────────────
+	img, _, decodeErr := image.Decode(bytes.NewReader(imageData))
+	if decodeErr == nil {
+		attrs := analyzeScreenshot(img)
+		if rowRecords, rowErr := extractPowerByRows(img, attrs); rowErr == nil && len(rowRecords) >= 3 {
+			log.Printf("Power OCR: row-based extraction succeeded with %d records", len(rowRecords))
+			return rowRecords, nil
+		} else {
+			log.Printf("Power OCR: row-based extraction did not produce enough records (%d), falling back to full image", len(rowRecords))
+		}
+	}
+
+	// ── Attempt 2: full-image OCR (original method) ────────────────────────────
 	// Preprocess image to filter and enhance relevant regions
 	processedData, err := preprocessImageForOCR(imageData)
 	if err != nil {
@@ -6941,6 +7231,117 @@ func parsePowerRankingsText(text string) []struct {
 	}
 
 	return records
+}
+
+// extractPowerByRows segments the power rankings screenshot into individual rows
+// using edge-based separator detection and OCRs each name+power cell separately.
+//
+// Layout (approximate — confirmed by visual inspection of game screenshots):
+//
+//	|<-- 0-35% avatar+rank badge -->|<-- 35-80% player name -->|<-- 80-100% power -->|
+//
+// Falls back to the fixed 35% column if detectAvatarEndX returns a wider result.
+func extractPowerByRows(img image.Image, attrs *ScreenshotAttributes) ([]struct {
+	MemberName string `json:"member_name"`
+	Power      int64  `json:"power"`
+}, error) {
+	bounds := img.Bounds()
+	imgW := bounds.Dx()
+	dataRegion := attrs.DataRegion
+
+	grayFull := convertToGrayscale(img)
+
+	const minRowH = 30
+	rowBounds := findRowBoundaries(grayFull, dataRegion.Top, dataRegion.Bottom, minRowH)
+
+	log.Printf("Power OCR: edge detection found %d rows in data region (was estimating %d)", len(rowBounds), attrs.EstimatedRows)
+
+	records := []struct {
+		MemberName string `json:"member_name"`
+		Power      int64  `json:"power"`
+	}{}
+
+	nonDigitRe := regexp.MustCompile(`[^0-9]`)
+
+	for i, rb := range rowBounds {
+		rowTop, rowBottom := rb[0], rb[1]
+		rowH := rowBottom - rowTop
+		if rowH < minRowH {
+			continue
+		}
+
+		// Detect avatar end; cap at 35% of image width
+		nameStartX := detectAvatarEndX(grayFull, rowTop, rowBottom, imgW*35/100)
+		nameEndX := imgW * 80 / 100
+		powerStartX := imgW * 80 / 100
+		if nameStartX >= nameEndX {
+			nameStartX = imgW * 35 / 100 // fallback
+		}
+
+		// Extract name region (top 60% of row to avoid alliance tag if present)
+		nameTopH := rowH * 60 / 100
+		nameImg := image.NewRGBA(image.Rect(0, 0, nameEndX-nameStartX, nameTopH))
+		draw.Draw(nameImg, nameImg.Bounds(), img, image.Point{nameStartX, rowTop}, draw.Src)
+
+		// Extract power region (full row height, digits whitelist)
+		powerImg := image.NewRGBA(image.Rect(0, 0, imgW-powerStartX, rowH))
+		draw.Draw(powerImg, powerImg.Bounds(), img, image.Point{powerStartX, rowTop}, draw.Src)
+
+		scaledName := scaleImage(nameImg, 3)
+		grayName := convertToGrayscale(scaledName)
+		scaledPower := scaleImage(powerImg, 3)
+		grayPower := convertToGrayscale(scaledPower)
+
+		var nameBuf bytes.Buffer
+		if err := png.Encode(&nameBuf, grayName); err != nil {
+			log.Printf("Power row %d: encode name failed: %v", i+1, err)
+			continue
+		}
+		nameClient := gosseract.NewClient()
+		defer nameClient.Close()
+		nameClient.SetImageFromBytes(nameBuf.Bytes())
+		nameClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+		nameText, err := nameClient.Text()
+		if err != nil || len(strings.TrimSpace(nameText)) == 0 {
+			continue
+		}
+
+		var powerBuf bytes.Buffer
+		if err := png.Encode(&powerBuf, grayPower); err != nil {
+			log.Printf("Power row %d: encode power failed: %v", i+1, err)
+			continue
+		}
+		powerClient := gosseract.NewClient()
+		defer powerClient.Close()
+		powerClient.SetImageFromBytes(powerBuf.Bytes())
+		powerClient.SetVariable("tessedit_char_whitelist", "0123456789,")
+		powerClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+		powerText, err := powerClient.Text()
+		if err != nil || len(strings.TrimSpace(powerText)) == 0 {
+			log.Printf("Power row %d: Name='%s', no power value found", i+1, strings.TrimSpace(nameText))
+			continue
+		}
+
+		name := cleanPlayerName(strings.TrimSpace(nameText))
+		if len(name) < 2 {
+			continue
+		}
+
+		powerStr := nonDigitRe.ReplaceAllString(strings.TrimSpace(powerText), "")
+		power, err := strconv.ParseInt(powerStr, 10, 64)
+		if err != nil || power < 1000000 { // power must be at least 1M
+			log.Printf("Power row %d: skipping invalid power '%s' for '%s'", i+1, powerStr, name)
+			continue
+		}
+
+		log.Printf("Power row %d: Name='%s', Power=%d", i+1, name, power)
+		records = append(records, struct {
+			MemberName string `json:"member_name"`
+			Power      int64  `json:"power"`
+		}{MemberName: name, Power: power})
+	}
+
+	return records, nil
 }
 
 // Normalize name for matching (remove common prefixes, spaces, special chars)
@@ -7286,72 +7687,63 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 	Points     int64  `json:"points"`
 }, error) {
 	bounds := img.Bounds()
+	imgW := bounds.Dx()
 	dataRegion := attrs.DataRegion
-	rowHeight := attrs.RowHeight
-	estimatedRows := attrs.EstimatedRows
 
-	if estimatedRows < 1 {
-		estimatedRows = 10
-	}
+	// Convert full image to grayscale once — reused for edge analysis in every row.
+	grayFull := convertToGrayscale(img)
+
+	// Use separator-line scanning to find exact row boundaries instead of the
+	// estimated rowHeight, which can misalign when rows vary in height.
+	const minRowH = 30
+	rowBounds := findRowBoundaries(grayFull, dataRegion.Top, dataRegion.Bottom, minRowH)
+
+	log.Printf("VS OCR: edge detection found %d rows in data region (was estimating %d)", len(rowBounds), attrs.EstimatedRows)
 
 	records := []struct {
 		MemberName string `json:"member_name"`
 		Points     int64  `json:"points"`
 	}{}
 
-	log.Printf("Processing %d estimated rows with height %d", estimatedRows, rowHeight)
-
-	// Extract and OCR each row
-	for i := 0; i < estimatedRows; i++ {
-		rowTop := dataRegion.Top + (i * rowHeight)
-		rowBottom := rowTop + rowHeight
-
-		// Ensure we don't go out of bounds
-		if rowBottom > dataRegion.Bottom {
-			rowBottom = dataRegion.Bottom
-		}
-		if rowTop >= rowBottom {
-			break
-		}
-
+	for i, rb := range rowBounds {
+		rowTop, rowBottom := rb[0], rb[1]
 		rowH := rowBottom - rowTop
-		rowW := bounds.Dx()
+		if rowH < minRowH {
+			continue
+		}
 
 		// === Layout of each row in the VS ranking screenshot ===
 		//
-		//  |<-- 0-28% rank+avatar -->|<---- 28-70% name (top) / alliance (bottom) --->|<-- 70-100% points -->|
+		//  |<-- avatar+rank -->|<---- name (top) / alliance (bottom) --->|<-- points -->|
 		//
-		// The player name appears in the TOP ~55% of the row.
-		// The alliance tag appears in the BOTTOM ~45% of the row.
-		// The points number is on the RIGHT and vertically centered in the full row.
-		//
-		// To avoid the alliance tag contaminating the points OCR, we use digits-only
-		// mode and strip all non-digit characters from the points result.
-		// For the name, we only OCR the top 55% of the row to skip the alliance tag.
+		// detectAvatarEndX measures the Sobel edge density across left-to-right column
+		// slices: avatar art has high density, the text background is near-zero.
+		// A hard cap at 40% prevents the detector from eating into the name column.
+		nameStartX := detectAvatarEndX(grayFull, rowTop, rowBottom, imgW*40/100)
 
-		nameTopH := rowH * 55 / 100 // upper portion containing the player name
+		nameEndX := imgW * 70 / 100
+		pointsStartX := imgW * 70 / 100
+		if nameStartX >= nameEndX {
+			nameStartX = imgW * 28 / 100 // safety fallback to fixed column
+		}
 
-		// Column boundaries
-		nameStartX := rowW * 28 / 100
-		nameEndX := rowW * 70 / 100
-		pointsStartX := rowW * 70 / 100
+		nameTopH := rowH * 55 / 100 // top 55% of the row contains the player name
 
-		// Extract name region: x[28%..70%], y[0..55%]
+		// Extract name region: [nameStartX..nameEndX] × [rowTop..rowTop+nameTopH]
 		nameImg := image.NewRGBA(image.Rect(0, 0, nameEndX-nameStartX, nameTopH))
 		draw.Draw(nameImg, nameImg.Bounds(), img, image.Point{nameStartX, rowTop}, draw.Src)
 
-		// Extract points region: x[70%..100%], y[0..100%]
-		pointsImg := image.NewRGBA(image.Rect(0, 0, rowW-pointsStartX, rowH))
+		// Extract points region: [70%..100%] × full row height
+		pointsImg := image.NewRGBA(image.Rect(0, 0, imgW-pointsStartX, rowH))
 		draw.Draw(pointsImg, pointsImg.Bounds(), img, image.Point{pointsStartX, rowTop}, draw.Src)
 
-		// Scale 3x for better OCR accuracy on small text
 		scaledName := scaleImage(nameImg, 3)
 		grayName := convertToGrayscale(scaledName)
 
 		scaledPoints := scaleImage(pointsImg, 3)
 		grayPoints := convertToGrayscale(scaledPoints)
 
-		// OCR the name segment
+		// OCR name segment
 		var nameBuf bytes.Buffer
 		if err := png.Encode(&nameBuf, grayName); err != nil {
 			log.Printf("Row %d: Failed to encode name segment: %v", i+1, err)
@@ -7364,10 +7756,10 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 		nameClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
 		nameText, err := nameClient.Text()
 		if err != nil || len(strings.TrimSpace(nameText)) == 0 {
-			continue // Skip empty rows
+			continue // empty row
 		}
 
-		// OCR the points segment — digits only to eliminate any text contamination
+		// OCR points segment — digits only
 		var pointsBuf bytes.Buffer
 		if err := png.Encode(&pointsBuf, grayPoints); err != nil {
 			log.Printf("Row %d: Failed to encode points segment: %v", i+1, err)
@@ -7377,7 +7769,6 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 		pointsClient := gosseract.NewClient()
 		defer pointsClient.Close()
 		pointsClient.SetImageFromBytes(pointsBuf.Bytes())
-		// Digits-only whitelist eliminates all alphabetic OCR noise
 		pointsClient.SetVariable("tessedit_char_whitelist", "0123456789,")
 		pointsClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
 		pointsText, err := pointsClient.Text()
@@ -7386,11 +7777,9 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 			continue
 		}
 
-		// Parse the extracted text
 		name := strings.TrimSpace(nameText)
 		name = cleanPlayerName(name)
 
-		// Strip anything that isn't a digit (belt-and-suspenders after the whitelist)
 		nonDigitRe := regexp.MustCompile(`[^0-9]`)
 		pointsStr := nonDigitRe.ReplaceAllString(strings.TrimSpace(pointsText), "")
 
@@ -7400,7 +7789,7 @@ func extractVSPointsByRows(img image.Image, attrs *ScreenshotAttributes) ([]stru
 			continue
 		}
 
-		if points < 1000 { // Sanity check — skip header row or near-zero noise
+		if points < 1000 { // skip header row / near-zero noise
 			continue
 		}
 
