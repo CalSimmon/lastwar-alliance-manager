@@ -93,13 +93,13 @@ type TrainSchedule struct {
 
 type Award struct {
 	ID             int     `json:"id"`
-	WeekDate        string  `json:"week_date"`
-	AwardType       string  `json:"award_type"`
-	Rank            int     `json:"rank"`
-	MemberID        int     `json:"member_id"`
-	MemberName      string  `json:"member_name"`
-	MemberNickname  *string `json:"member_nickname,omitempty"`
-	CreatedAt       string  `json:"created_at"`
+	WeekDate       string  `json:"week_date"`
+	AwardType      string  `json:"award_type"`
+	Rank           int     `json:"rank"`
+	MemberID       int     `json:"member_id"`
+	MemberName     string  `json:"member_name"`
+	MemberNickname *string `json:"member_nickname,omitempty"`
+	CreatedAt      string  `json:"created_at"`
 }
 
 type AwardType struct {
