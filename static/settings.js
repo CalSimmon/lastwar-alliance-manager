@@ -138,6 +138,10 @@ async function loadSettings() {
         const powerTrackingEnabled = settings.power_tracking_enabled || false;
         document.getElementById('power-tracking-enabled').checked = powerTrackingEnabled;
         togglePowerUploadSection(powerTrackingEnabled);
+
+        // VIP seat
+        const vipSeatEnabled = settings.vip_seat_enabled !== undefined ? settings.vip_seat_enabled : true;
+        document.getElementById('vip-seat-enabled').checked = vipSeatEnabled;
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings.', 'error');
@@ -170,6 +174,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         min_power: parseInt(document.getElementById('min-power').value) || 0,
         min_hq_level: parseInt(document.getElementById('min-hq-level').value) || 0,
         power_tracking_enabled: document.getElementById('power-tracking-enabled').checked,
+        vip_seat_enabled: document.getElementById('vip-seat-enabled').checked,
         server_timezone: document.getElementById('server-timezone').value,
         conductor_time: document.getElementById('conductor-time').value,
         backup_time: document.getElementById('backup-time').value,
@@ -219,6 +224,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
         document.getElementById('vs-daily-target').value = 0;
         document.getElementById('vs-weekly-target').value = 0;
         document.getElementById('power-tracking-enabled').checked = false;
+        document.getElementById('vip-seat-enabled').checked = true;
     }
 });
 

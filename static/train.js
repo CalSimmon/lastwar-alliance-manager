@@ -11,6 +11,7 @@ let allHistory = [];
 let currentUsername = '';
 let currentUserRank = '';
 let isAdmin = false;
+let vipSeatEnabled = true;
 
 // Return member nickname or null by member ID from allMembers
 function nickByID(id) {
@@ -458,7 +459,7 @@ function renderScheduleGrid() {
                 }
             }
             html += `</div>`;
-            if (schedule.vip_name) {
+            if (vipSeatEnabled && schedule.vip_name) {
                 html += `<div class="vip-seat"><strong>VIP:</strong> ${nameNick(schedule.vip_name, nickByID(schedule.vip_id))}</div>`;
             }
             if (schedule.notes) {
@@ -659,8 +660,19 @@ function populateBackupSelect(members, schedule) {
     });
 }
 
+// Apply VIP seat visibility based on the vipSeatEnabled setting
+function applyVipSeatVisibility() {
+    const drawVipBtn = document.getElementById('draw-vip-btn');
+    if (drawVipBtn) drawVipBtn.style.display = vipSeatEnabled ? '' : 'none';
+}
+
 // Populate VIP select (any member, optional)
 function populateVipSelect(members, schedule) {
+    // Hide/show the VIP form group based on setting
+    const vipFormGroup = document.getElementById('vip-search') && document.getElementById('vip-search').closest('.form-group');
+    if (vipFormGroup) vipFormGroup.style.display = vipSeatEnabled ? '' : 'none';
+    if (!vipSeatEnabled) return;
+
     const vipSelect = document.getElementById('vip-select');
     vipSelect.innerHTML = '<option value="">— No VIP assigned —</option>';
 
@@ -850,7 +862,7 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     const conductorId = parseInt(document.getElementById('conductor-select').value);
     const backupId = parseInt(document.getElementById('backup-select').value);
     const vipSelectVal = document.getElementById('vip-select').value;
-    const vipId = vipSelectVal ? parseInt(vipSelectVal) : null;
+    const vipId = (vipSeatEnabled && vipSelectVal) ? parseInt(vipSelectVal) : null;
     const notes = document.getElementById('notes').value.trim() || null;
     
     const attendanceRadio = document.querySelector('input[name="attendance"]:checked');
@@ -1012,7 +1024,7 @@ function renderHistory(filter) {
             }
         }
         html += `</div>`;
-        if (schedule.vip_name) {
+        if (vipSeatEnabled && schedule.vip_name) {
             html += `<div><strong>VIP:</strong> ${nameNick(schedule.vip_name, nickByID(schedule.vip_id))}</div>`;
         }
         if (schedule.notes) {
@@ -1093,6 +1105,16 @@ function escapeHtml(text) {
 document.addEventListener('DOMContentLoaded', async () => {
     const isAuthenticated = await checkAuth();
     if (isAuthenticated) {
+        // Load settings first so vipSeatEnabled is set before rendering
+        try {
+            const settingsRes = await fetch('/api/settings');
+            if (settingsRes.ok) {
+                const s = await settingsRes.json();
+                vipSeatEnabled = s.vip_seat_enabled !== undefined ? s.vip_seat_enabled : true;
+            }
+        } catch {}
+        applyVipSeatVisibility();
+
         await setupEventListeners();
         await loadMembers();
         initializeWeek();

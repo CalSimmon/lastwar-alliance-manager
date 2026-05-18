@@ -237,6 +237,7 @@ type Settings struct {
 	VSPointsWeeklyTarget         int    `json:"vs_points_weekly_target"`
 	MinPower                     int    `json:"min_power"`
 	MinHQLevel                   int    `json:"min_hq_level"`
+	VipSeatEnabled               bool   `json:"vip_seat_enabled"`
 }
 
 type MemberRanking struct {
@@ -1686,6 +1687,17 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added min_hq_level column to settings table")
+	}
+
+	// Migrate settings table to add vip_seat_enabled column if missing
+	var vipSeatEnabledColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='vip_seat_enabled'`).Scan(&vipSeatEnabledColumnExists)
+	if err != nil || !vipSeatEnabledColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN vip_seat_enabled INTEGER NOT NULL DEFAULT 1`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added vip_seat_enabled column to settings table")
 	}
 
 	return nil
@@ -4462,7 +4474,8 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		COALESCE(vs_points_daily_target, 0) as vs_points_daily_target,
 		COALESCE(vs_points_weekly_target, 0) as vs_points_weekly_target,
 		COALESCE(min_power, 0) as min_power,
-		COALESCE(min_hq_level, 0) as min_hq_level
+		COALESCE(min_hq_level, 0) as min_hq_level,
+		COALESCE(vip_seat_enabled, 1) as vip_seat_enabled
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AllianceName,
@@ -4486,6 +4499,7 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		&settings.VSPointsWeeklyTarget,
 		&settings.MinPower,
 		&settings.MinHQLevel,
+		&settings.VipSeatEnabled,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -4535,7 +4549,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		vs_points_daily_target = ?,
 		vs_points_weekly_target = ?,
 		min_power = ?,
-		min_hq_level = ?
+		min_hq_level = ?,
+		vip_seat_enabled = ?
 		WHERE id = 1`,
 		settings.AllianceName,
 		settings.AllianceShortName,
@@ -4558,6 +4573,7 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.VSPointsWeeklyTarget,
 		settings.MinPower,
 		settings.MinHQLevel,
+		settings.VipSeatEnabled,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
