@@ -119,7 +119,7 @@ function populateMemberSelect() {
     allMembers.forEach(member => {
         const option = document.createElement('option');
         option.value = member.id;
-        option.textContent = `${member.name} (${member.rank})`;
+        option.textContent = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
         select.appendChild(option);
     });
 }
@@ -494,7 +494,7 @@ function renderGroupedView(recs, container) {
     recs.forEach(rec => {
         if (!grouped[rec.member_id]) {
             grouped[rec.member_id] = {
-                member: { id: rec.member_id, name: rec.member_name, rank: rec.member_rank },
+                member: { id: rec.member_id, name: rec.member_name, rank: rec.member_rank, nickname: rec.member_nickname || null },
                 recommendations: []
             };
         }
@@ -511,7 +511,7 @@ function renderGroupedView(recs, container) {
         groupCard.innerHTML = `
             <div class="member-group-header">
                 <div class="member-info">
-                    <span class="member-name">${group.member.name}</span>
+                    <span class="member-name">${escapeHtml(group.member.name)}${group.member.nickname ? '<span class="member-nickname"> aka ' + escapeHtml(group.member.nickname) + '</span>' : ''}</span>
                     <span class="rank-badge rank-badge-${group.member.rank.toLowerCase()}">${group.member.rank}</span>
                     <span class="conduct-count">${activeRecs.length} active</span>
                 </div>

@@ -302,7 +302,9 @@ function renderAwardsForm(preserveFormState = false, focusAward = null) {
             
             allMembers.forEach(member => {
                 const selected = member.id === selectedMemberId ? 'selected' : '';
-                html += `<option value="${member.id}" ${selected} data-name="${member.name.toLowerCase()}">${escapeHtml(member.name)} (${member.rank})</option>`;
+                const nickPart = member.nickname ? ` [${member.nickname}]` : '';
+                const searchName = (member.name + (member.nickname ? ' ' + member.nickname : '')).toLowerCase();
+                html += `<option value="${member.id}" ${selected} data-name="${searchName}">${escapeHtml(member.name)}${escapeHtml(nickPart)} (${member.rank})</option>`;
             });
             
             html += `</select>`;
@@ -598,7 +600,7 @@ function renderHistory() {
             awards.forEach(award => {
                 const rankEmoji = award.rank === 1 ? '🥇' : award.rank === 2 ? '🥈' : '🥉';
                 html += `<div class="history-award-item rank-${award.rank}">`;
-                html += `${rankEmoji} ${escapeHtml(award.member_name)}`;
+                html += `${rankEmoji} ${escapeHtml(award.member_name)}${award.member_nickname ? '<span class="member-nickname"> aka ' + escapeHtml(award.member_nickname) + '</span>' : ''}`;
                 html += `</div>`;
             });
             

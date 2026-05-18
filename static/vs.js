@@ -190,7 +190,7 @@ function renderTable() {
         </tr>`;
 
     // Filter
-    let members = allMembers.filter(m => !search || m.name.toLowerCase().includes(search));
+    let members = allMembers.filter(m => !search || m.name.toLowerCase().includes(search) || (m.nickname && m.nickname.toLowerCase().includes(search)));
 
     // Sort
     members = [...members].sort((a, b) => {
@@ -236,7 +236,7 @@ function renderTable() {
             <tr class="${!r ? 'vs2-row-nodata' : ''}">
                 <td class="rk-col-pos">${i + 1}</td>
                 <td class="rk-col-name">
-                    <span class="rk-member-name">${escapeHtml(m.name)}</span>
+                    <span class="rk-member-name">${escapeHtml(m.name)}${m.nickname ? '<span class="member-nickname"> aka ' + escapeHtml(m.nickname) + '</span>' : ''}</span>
                     <span class="rank-badge rank-badge-${m.rank.toLowerCase()}">${m.rank}</span>
                 </td>
                 ${cells}

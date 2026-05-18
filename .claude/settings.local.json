@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"F:\\\\Projects\\\\LastWar\\\\static\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(git push *)",
+      "Bash(go vet *)",
+      "WebSearch",
+      "Bash(gh issue *)",
+      "Bash(gh label *)"
+    ]
+  }
+}

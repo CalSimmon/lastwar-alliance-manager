@@ -92,13 +92,14 @@ type TrainSchedule struct {
 }
 
 type Award struct {
-	ID         int    `json:"id"`
-	WeekDate   string `json:"week_date"`
-	AwardType  string `json:"award_type"`
-	Rank       int    `json:"rank"`
-	MemberID   int    `json:"member_id"`
-	MemberName string `json:"member_name"`
-	CreatedAt  string `json:"created_at"`
+	ID             int     `json:"id"`
+	WeekDate        string  `json:"week_date"`
+	AwardType       string  `json:"award_type"`
+	Rank            int     `json:"rank"`
+	MemberID        int     `json:"member_id"`
+	MemberName      string  `json:"member_name"`
+	MemberNickname  *string `json:"member_nickname,omitempty"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 type AwardType struct {
@@ -110,28 +111,30 @@ type AwardType struct {
 }
 
 type Recommendation struct {
-	ID              int    `json:"id"`
-	MemberID        int    `json:"member_id"`
-	MemberName      string `json:"member_name"`
-	MemberRank      string `json:"member_rank"`
-	RecommendedBy   string `json:"recommended_by"`
-	RecommendedByID int    `json:"recommended_by_id"`
-	Notes           string `json:"notes"`
-	CreatedAt       string `json:"created_at"`
-	Expired         bool   `json:"expired"`
+	ID              int     `json:"id"`
+	MemberID        int     `json:"member_id"`
+	MemberName      string  `json:"member_name"`
+	MemberRank      string  `json:"member_rank"`
+	MemberNickname  *string `json:"member_nickname,omitempty"`
+	RecommendedBy   string  `json:"recommended_by"`
+	RecommendedByID int     `json:"recommended_by_id"`
+	Notes           string  `json:"notes"`
+	CreatedAt       string  `json:"created_at"`
+	Expired         bool    `json:"expired"`
 }
 
 type ConductReport struct {
-	ID          int    `json:"id"`
-	MemberID    int    `json:"member_id"`
-	MemberName  string `json:"member_name"`
-	MemberRank  string `json:"member_rank"`
-	Points      int    `json:"points"`
-	Notes       string `json:"notes"`
-	CreatedBy   string `json:"created_by"`
-	CreatedByID int    `json:"created_by_id"`
-	CreatedAt   string `json:"created_at"`
-	Expired     bool   `json:"expired"`
+	ID             int     `json:"id"`
+	MemberID       int     `json:"member_id"`
+	MemberName     string  `json:"member_name"`
+	MemberRank     string  `json:"member_rank"`
+	MemberNickname *string `json:"member_nickname,omitempty"`
+	Points         int     `json:"points"`
+	Notes          string  `json:"notes"`
+	CreatedBy      string  `json:"created_by"`
+	CreatedByID    int     `json:"created_by_id"`
+	CreatedAt      string  `json:"created_at"`
+	Expired        bool    `json:"expired"`
 }
 
 type WeekAwards struct {
@@ -3511,7 +3514,7 @@ func getAwards(w http.ResponseWriter, r *http.Request) {
 	if weekDate != "" {
 		query = `
 			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id,
-			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), a.created_at
+			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), m.nickname, a.created_at
 			FROM awards a
 			LEFT JOIN members m ON a.member_id = m.id AND m.deleted_at IS NULL
 			WHERE a.week_date = ?
@@ -3521,7 +3524,7 @@ func getAwards(w http.ResponseWriter, r *http.Request) {
 	} else {
 		query = `
 			SELECT a.id, a.week_date, a.award_type, a.rank, a.member_id,
-			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), a.created_at
+			       COALESCE(m.name, a.member_name_snapshot, '[Removed Member]'), m.nickname, a.created_at
 			FROM awards a
 			LEFT JOIN members m ON a.member_id = m.id AND m.deleted_at IS NULL
 			ORDER BY a.week_date DESC, a.award_type, a.rank
@@ -3538,9 +3541,13 @@ func getAwards(w http.ResponseWriter, r *http.Request) {
 	awards := []Award{}
 	for rows.Next() {
 		var a Award
-		if err := rows.Scan(&a.ID, &a.WeekDate, &a.AwardType, &a.Rank, &a.MemberID, &a.MemberName, &a.CreatedAt); err != nil {
+		var nick sql.NullString
+		if err := rows.Scan(&a.ID, &a.WeekDate, &a.AwardType, &a.Rank, &a.MemberID, &a.MemberName, &nick, &a.CreatedAt); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if nick.Valid && nick.String != "" {
+			a.MemberNickname = &nick.String
 		}
 		awards = append(awards, a)
 	}
@@ -3817,7 +3824,7 @@ func getVSCompliance(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow(`SELECT COALESCE(vs_points_daily_target,0), COALESCE(vs_points_weekly_target,0) FROM settings WHERE id=1`).Scan(&dailyTarget, &weeklyTarget)
 
 	// Load all active members
-	memberRows, err := db.Query(`SELECT id, name, rank FROM members WHERE deleted_at IS NULL ORDER BY name`)
+	memberRows, err := db.Query(`SELECT id, name, COALESCE(nickname,''), rank FROM members WHERE deleted_at IS NULL ORDER BY name`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -3825,14 +3832,15 @@ func getVSCompliance(w http.ResponseWriter, r *http.Request) {
 	defer memberRows.Close()
 
 	type Member struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-		Rank string `json:"rank"`
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Nickname string `json:"nickname,omitempty"`
+		Rank     string `json:"rank"`
 	}
 	var members []Member
 	for memberRows.Next() {
 		var m Member
-		if err := memberRows.Scan(&m.ID, &m.Name, &m.Rank); err != nil {
+		if err := memberRows.Scan(&m.ID, &m.Name, &m.Nickname, &m.Rank); err != nil {
 			continue
 		}
 		members = append(members, m)
@@ -3842,6 +3850,7 @@ func getVSCompliance(w http.ResponseWriter, r *http.Request) {
 	type MemberCompliance struct {
 		MemberID    int    `json:"member_id"`
 		Name        string `json:"name"`
+		Nickname    string `json:"nickname,omitempty"`
 		Rank        string `json:"rank"`
 		Monday      int    `json:"monday"`
 		Tuesday     int    `json:"tuesday"`
@@ -3908,7 +3917,7 @@ func getVSCompliance(w http.ResponseWriter, r *http.Request) {
 		weekVS := vsData[weekDate]
 		memberList := make([]MemberCompliance, 0, len(members))
 		for _, m := range members {
-			mc := MemberCompliance{MemberID: m.ID, Name: m.Name, Rank: m.Rank}
+			mc := MemberCompliance{MemberID: m.ID, Name: m.Name, Nickname: m.Nickname, Rank: m.Rank}
 			if row, ok := weekVS[m.ID]; ok {
 				mc.Monday, mc.Tuesday, mc.Wednesday = row.Mon, row.Tue, row.Wed
 				mc.Thursday, mc.Friday, mc.Saturday = row.Thu, row.Fri, row.Sat
@@ -4100,6 +4109,7 @@ func getRecommendations(w http.ResponseWriter, r *http.Request) {
 			rec.member_id, 
 			COALESCE(m.name, rec.member_name_snapshot, '[Removed Member]'),
 			COALESCE(m.rank, ''),
+			m.nickname,
 			u.username,
 			rec.recommended_by_id,
 			COALESCE(rec.notes, ''),
@@ -4128,10 +4138,14 @@ func getRecommendations(w http.ResponseWriter, r *http.Request) {
 	recommendations := []Recommendation{}
 	for rows.Next() {
 		var rec Recommendation
+		var nick sql.NullString
 		if err := rows.Scan(&rec.ID, &rec.MemberID, &rec.MemberName, &rec.MemberRank,
-			&rec.RecommendedBy, &rec.RecommendedByID, &rec.Notes, &rec.CreatedAt, &rec.Expired); err != nil {
+			&nick, &rec.RecommendedBy, &rec.RecommendedByID, &rec.Notes, &rec.CreatedAt, &rec.Expired); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if nick.Valid && nick.String != "" {
+			rec.MemberNickname = &nick.String
 		}
 		recommendations = append(recommendations, rec)
 	}
@@ -4269,6 +4283,7 @@ func getConductReports(w http.ResponseWriter, r *http.Request) {
 			dr.member_id, 
 			COALESCE(m.name, dr.member_name_snapshot, '[Removed Member]'),
 			COALESCE(m.rank, ''),
+			m.nickname,
 			dr.points,
 			dr.notes,
 			u.username,
@@ -4292,10 +4307,14 @@ func getConductReports(w http.ResponseWriter, r *http.Request) {
 	conductReports := []ConductReport{}
 	for rows.Next() {
 		var dr ConductReport
+		var nick sql.NullString
 		if err := rows.Scan(&dr.ID, &dr.MemberID, &dr.MemberName, &dr.MemberRank,
-			&dr.Points, &dr.Notes, &dr.CreatedBy, &dr.CreatedByID, &dr.CreatedAt, &dr.Expired); err != nil {
+			&nick, &dr.Points, &dr.Notes, &dr.CreatedBy, &dr.CreatedByID, &dr.CreatedAt, &dr.Expired); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if nick.Valid && nick.String != "" {
+			dr.MemberNickname = &nick.String
 		}
 		conductReports = append(conductReports, dr)
 	}
@@ -5030,7 +5049,7 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get all active members
-	rows, err := db.Query("SELECT id, name, rank FROM members WHERE deleted_at IS NULL ORDER BY name")
+	rows, err := db.Query("SELECT id, name, nickname, rank FROM members WHERE deleted_at IS NULL ORDER BY name")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -5040,9 +5059,13 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 	var members []Member
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.ID, &m.Name, &m.Rank); err != nil {
+		var nick sql.NullString
+		if err := rows.Scan(&m.ID, &m.Name, &nick, &m.Rank); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if nick.Valid && nick.String != "" {
+			m.Nickname = &nick.String
 		}
 		members = append(members, m)
 	}

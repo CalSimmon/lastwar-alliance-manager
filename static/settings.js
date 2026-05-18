@@ -341,7 +341,7 @@ function renderRotationList(members) {
     list.innerHTML = members.map((m, i) => `
         <div class="rotation-item" data-id="${m.id}" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
             <span style="color:var(--text-muted); font-size:13px; min-width:24px;">${i + 1}.</span>
-            <span style="flex:1; font-weight:600;">${escapeHtml(m.name)}</span>
+            <span style="flex:1; font-weight:600;">${escapeHtml(m.name)}${m.nickname ? ' <span style="font-weight:400; color:var(--text-muted); font-size:13px;">aka ' + escapeHtml(m.nickname) + '</span>' : ''}</span>
             <span style="color:var(--text-muted); font-size:12px; margin-right:8px;">${m.rank}</span>
             <button class="rotation-up-btn" data-index="${i}" title="Move up" style="background:none; border:1px solid var(--border-color); border-radius:4px; padding:2px 8px; cursor:pointer; color:var(--text-primary);"
                 ${i === 0 ? 'disabled' : ''}>▲</button>

@@ -200,7 +200,7 @@ function memberCard(m, targets, isCurrentWeek, todayDayIdx) {
     return `
         <div class="vc-member-card ${statusCls}">
             <div class="vc-card-header">
-                <span class="vc-member-name">${escapeHtml(m.name)}</span>
+                <span class="vc-member-name">${escapeHtml(m.name)}${m.nickname ? '<span class="member-nickname"> aka ' + escapeHtml(m.nickname) + '</span>' : ''}</span>
                 ${rankBadge}
                 ${statusBadge}
             </div>

@@ -134,7 +134,7 @@ function displayUpNext(rankings) {
             <div class="rk-up-card rk-up-${i + 1}">
                 <div class="rk-up-label">${labels[i]}</div>
                 <div class="rk-up-name">
-                    ${escapeHtml(r.member.name)}
+                    ${escapeHtml(r.member.name)}${r.member.nickname ? '<span class="member-nickname"> aka ' + escapeHtml(r.member.nickname) + '</span>' : ''}
                     <span class="rank-badge rank-badge-${r.member.rank.toLowerCase()}">${r.member.rank}</span>
                     ${isFirst ? '<span class="first-timer-badge" title="Never been conductor">🆕</span>' : ''}
                 </div>
@@ -152,7 +152,7 @@ function applyFiltersAndSort() {
     const sortBy = document.getElementById('sort-by').value;
 
     filteredRankings = currentData.rankings.filter(r => {
-        const nameOk = !nameFilter || r.member.name.toLowerCase().includes(nameFilter);
+        const nameOk = !nameFilter || r.member.name.toLowerCase().includes(nameFilter) || (r.member.nickname && r.member.nickname.toLowerCase().includes(nameFilter));
         const rankOk = !activeRankFilter
             || (activeRankFilter === 'first-timer' ? r.conductor_count === 0 : r.member.rank === activeRankFilter);
         return nameOk && rankOk;
@@ -223,7 +223,7 @@ function buildRowPair(ranking, index) {
         <tr class="rk-row" data-member-id="${ranking.member.id}" onclick="toggleRow(${ranking.member.id})">
             <td class="rk-col-pos">${medal}${change}</td>
             <td class="rk-col-name">
-                <span class="rk-member-name">${escapeHtml(ranking.member.name)}</span>
+                <span class="rk-member-name">${escapeHtml(ranking.member.name)}${ranking.member.nickname ? '<span class="member-nickname"> aka ' + escapeHtml(ranking.member.nickname) + '</span>' : ''}</span>
                 <span class="rank-badge rank-badge-${ranking.member.rank.toLowerCase()}">${ranking.member.rank}</span>
                 ${isFirst ? '<span class="first-timer-badge" title="Never been conductor">🆕</span>' : ''}
             </td>

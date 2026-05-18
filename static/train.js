@@ -12,6 +12,19 @@ let currentUsername = '';
 let currentUserRank = '';
 let isAdmin = false;
 
+// Return member nickname or null by member ID from allMembers
+function nickByID(id) {
+    if (!id) return null;
+    const m = allMembers.find(m => m.id === id);
+    return m ? (m.nickname || null) : null;
+}
+
+// Render name + optional nickname span
+function nameNick(name, nick) {
+    if (!nick) return escapeHtml(name);
+    return `${escapeHtml(name)} <span class="member-nickname">aka ${escapeHtml(nick)}</span>`;
+}
+
 // Check authentication on page load
 async function checkAuth() {
     try {
@@ -422,7 +435,7 @@ function renderScheduleGrid() {
             
             html += `<div class="schedule-info ${showedUpClass}">`;
             html += `<div class="conductor">`;
-            html += `<strong>Conductor:</strong><br>${escapeHtml(schedule.conductor_name)}`;
+            html += `<strong>Conductor:</strong><br>${nameNick(schedule.conductor_name, nickByID(schedule.conductor_id))}`;
             if (schedule.conductor_score !== null && schedule.conductor_score !== undefined) {
                 html += ` <span class="score-badge">${schedule.conductor_score} pts</span>`;
             }
@@ -433,12 +446,12 @@ function renderScheduleGrid() {
             }
             html += `</div>`;
             html += `<div class="backup">`;
-            html += `<strong>Backup:</strong><br>${escapeHtml(schedule.backup_name)} (${schedule.backup_rank})`;
+            html += `<strong>Backup:</strong><br>${nameNick(schedule.backup_name, nickByID(schedule.backup_id))} (${schedule.backup_rank})`;
             if (schedule.conductor_showed_up === false) {
                 if (schedule.actual_conductor_id) {
                     // Backup assigned to someone else
                     html += ' <span class="status-badge info">📋 Assigned to:</span>';
-                    html += `<br><strong>${escapeHtml(schedule.actual_conductor_name)}</strong>`;
+                    html += `<br><strong>${nameNick(schedule.actual_conductor_name, nickByID(schedule.actual_conductor_id))}</strong>`;
                 } else {
                     // Backup conducted it themselves
                     html += ' <span class="status-badge active">🚂 Stepped in</span>';
@@ -446,7 +459,7 @@ function renderScheduleGrid() {
             }
             html += `</div>`;
             if (schedule.vip_name) {
-                html += `<div class="vip-seat"><strong>VIP:</strong> ${escapeHtml(schedule.vip_name)}</div>`;
+                html += `<div class="vip-seat"><strong>VIP:</strong> ${nameNick(schedule.vip_name, nickByID(schedule.vip_id))}</div>`;
             }
             if (schedule.notes) {
                 html += `<div class="notes"><strong>Notes:</strong> ${escapeHtml(schedule.notes)}</div>`;
@@ -586,7 +599,7 @@ function populateConductorSelect(members, schedule) {
         option.value = member.id;
         
         // Build option text with stats
-        let optionText = `${member.name} (${member.rank})`;
+        let optionText = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
         const stats = memberStats[member.id];
         if (stats) {
             const statsInfo = [];
@@ -612,7 +625,7 @@ function populateConductorSelect(members, schedule) {
         }
         
         option.textContent = optionText;
-        option.dataset.name = member.name.toLowerCase();
+        option.dataset.name = (member.name + (member.nickname ? ' ' + member.nickname : '')).toLowerCase();
         option.dataset.rank = member.rank.toLowerCase();
         if (schedule && member.id === schedule.conductor_id) {
             option.selected = true;
@@ -631,14 +644,14 @@ function populateBackupSelect(members, schedule) {
         option.value = member.id;
         
         // Build option text with stats
-        let optionText = member.name;
+        let optionText = member.name + (member.nickname ? ' [' + member.nickname + ']' : '');
         const stats = memberStats[member.id];
         if (stats && stats.backup_used_count > 0) {
             optionText += ` (used as backup ${stats.backup_used_count}x)`;
         }
         
         option.textContent = optionText;
-        option.dataset.name = member.name.toLowerCase();
+        option.dataset.name = (member.name + (member.nickname ? ' ' + member.nickname : '')).toLowerCase();
         if (schedule && member.id === schedule.backup_id) {
             option.selected = true;
         }
@@ -654,8 +667,8 @@ function populateVipSelect(members, schedule) {
     members.forEach(member => {
         const option = document.createElement('option');
         option.value = member.id;
-        option.textContent = `${member.name} (${member.rank})`;
-        option.dataset.name = member.name.toLowerCase();
+        option.textContent = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
+        option.dataset.name = (member.name + (member.nickname ? ' ' + member.nickname : '')).toLowerCase();
         if (schedule && schedule.vip_id && member.id === schedule.vip_id) {
             option.selected = true;
         }
@@ -672,7 +685,7 @@ async function fetchAndShowRotationHint() {
         if (!res.ok) { hint.style.display = 'none'; return; }
         const data = await res.json();
         if (data.members && data.members.length > 0) {
-            hint.textContent = `🔄 Next in rotation: ${data.members[0].name} (${data.members[0].rank})`;
+        hint.textContent = `🔄 Next in rotation: ${data.members[0].name}${data.members[0].nickname ? ' [' + data.members[0].nickname + ']' : ''} (${data.members[0].rank})`;
             hint.style.display = 'block';
         } else {
             hint.style.display = 'none';
@@ -691,14 +704,14 @@ function populateActualConductorSelect(members, schedule) {
         option.value = member.id;
         
         // Build option text with stats
-        let optionText = `${member.name} (${member.rank})`;
+        let optionText = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
         const stats = memberStats[member.id];
         if (stats && stats.actual_conductor_count > 0) {
             optionText += ` - assigned ${stats.actual_conductor_count}x`;
         }
         
         option.textContent = optionText;
-        option.dataset.name = member.name.toLowerCase();
+        option.dataset.name = (member.name + (member.nickname ? ' ' + member.nickname : '')).toLowerCase();
         if (schedule && schedule.actual_conductor_id && member.id === schedule.actual_conductor_id) {
             option.selected = true;
         }
@@ -981,18 +994,18 @@ function renderHistory(filter) {
         html += `<div class="history-card ${showedUpClass}">`;
         html += `<div class="history-date">${formatDisplayDate(schedule.date)}</div>`;
         html += `<div class="history-details">`;
-        html += `<div><strong>Conductor:</strong> ${escapeHtml(schedule.conductor_name)}`;
+        html += `<div><strong>Conductor:</strong> ${nameNick(schedule.conductor_name, nickByID(schedule.conductor_id))}`;
         if (schedule.conductor_showed_up !== null) {
             html += schedule.conductor_showed_up ? 
                 ' <span class="status-badge success">✓</span>' :
                 ' <span class="status-badge warning">✗</span>';
         }
         html += `</div>`;
-        html += `<div><strong>Backup:</strong> ${escapeHtml(schedule.backup_name)}`;
+        html += `<div><strong>Backup:</strong> ${nameNick(schedule.backup_name, nickByID(schedule.backup_id))}`;
         if (schedule.conductor_showed_up === false) {
             if (schedule.actual_conductor_id) {
                 // Backup assigned to someone else
-                html += ' <span class="status-badge info">📋 Assigned to ' + escapeHtml(schedule.actual_conductor_name) + '</span>';
+                html += ' <span class="status-badge info">📋 Assigned to ' + nameNick(schedule.actual_conductor_name, nickByID(schedule.actual_conductor_id)) + '</span>';
             } else {
                 // Backup conducted it themselves
                 html += ' <span class="status-badge active">🚂 Stepped in</span>';
@@ -1000,7 +1013,7 @@ function renderHistory(filter) {
         }
         html += `</div>`;
         if (schedule.vip_name) {
-            html += `<div><strong>VIP:</strong> ${escapeHtml(schedule.vip_name)}</div>`;
+            html += `<div><strong>VIP:</strong> ${nameNick(schedule.vip_name, nickByID(schedule.vip_id))}</div>`;
         }
         if (schedule.notes) {
             html += `<div class="history-notes">${escapeHtml(schedule.notes)}</div>`;
@@ -1175,11 +1188,11 @@ async function runLuckyDraw(type) {
             return;
         }
 
-        const eligibleList = (data.eligible || []).map(m => escapeHtml(m.name)).join(', ');
+        const eligibleList = (data.eligible || []).map(m => m.nickname ? escapeHtml(m.name) + ' [' + escapeHtml(m.nickname) + ']' : escapeHtml(m.name)).join(', ');
         panel.innerHTML = `
             <div style="margin-top:8px;">
                 <strong>🏆 ${type === 'conductor' ? 'Conductor' : 'VIP'} Winner:</strong>
-                <span style="font-size:1.1em; color:var(--accent-primary); margin-left:8px;">${escapeHtml(data.winner.name)}</span>
+                <span style="font-size:1.1em; color:var(--accent-primary); margin-left:8px;">${nameNick(data.winner.name, data.winner.nickname)}</span>
                 <span style="color:var(--text-muted); font-size:12px; margin-left:6px;">${escapeHtml(data.winner.rank)}</span>
             </div>
             <div style="margin-top:6px; font-size:12px; color:var(--text-muted);">

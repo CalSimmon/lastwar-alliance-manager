@@ -255,10 +255,7 @@ function initSearchableSelect(container) {
     if (currentMemberId) {
         const member = allMembers.find(m => m.id === currentMemberId);
         if (member) {
-            searchInput.value = `${member.name} (${member.rank})`;
-        }
-    }
-    
+            searchInput.value = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
     // Show dropdown on focus
     searchInput.addEventListener('focus', () => {
         updateDropdownList(container, '');
@@ -296,6 +293,7 @@ function updateDropdownList(container, searchTerm) {
         // Check if member matches search term
         const matchesSearch = searchTerm === '' || 
             member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (member.nickname && member.nickname.toLowerCase().includes(searchTerm.toLowerCase())) ||
             member.rank.toLowerCase().includes(searchTerm.toLowerCase());
         
         // Check if member is available (not assigned in this stage)
@@ -310,7 +308,7 @@ function updateDropdownList(container, searchTerm) {
         html += '<div class="dropdown-item disabled">No members found</div>';
     } else {
         filteredMembers.forEach(member => {
-            html += `<div class="dropdown-item" data-member-id="${member.id}">${escapeHtml(member.name)} (${member.rank})</div>`;
+            html += `<div class="dropdown-item" data-member-id="${member.id}">${escapeHtml(member.name)}${member.nickname ? ' <span class="member-nickname">aka ' + escapeHtml(member.nickname) + '</span>' : ''} (${member.rank})</div>`;
         });
     }
     
@@ -325,7 +323,10 @@ function updateDropdownList(container, searchTerm) {
             hiddenInput.value = memberId || '';
             
             // Update search input display
-            searchInput.value = item.textContent.trim();
+            const selMember = allMembers.find(m => m.id === memberId);
+            searchInput.value = selMember
+                ? `${selMember.name}${selMember.nickname ? ' [' + selMember.nickname + ']' : ''} (${selMember.rank})`
+                : item.textContent.trim();
             
             // Update assignments
             if (!assignments[buildingId]) {

@@ -235,7 +235,7 @@ async function loadMembers() {
 function populateMemberDropdown() {
     const select = document.getElementById('member-id');
     select.innerHTML = '<option value="">No member linked</option>' + 
-        allMembers.map(m => `<option value="${m.id}">${m.name} (${m.rank})</option>`).join('');
+        allMembers.map(m => `<option value="${m.id}">${m.name}${m.nickname ? ' [' + m.nickname + ']' : ''} (${m.rank})</option>`).join('');
 }
 
 // Show Create User Modal

@@ -114,7 +114,7 @@ function populateMemberSelect() {
     allMembers.forEach(member => {
         const option = document.createElement('option');
         option.value = member.id;
-        option.textContent = `${member.name} (${member.rank})`;
+        option.textContent = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
         select.appendChild(option);
     });
 }
@@ -238,7 +238,7 @@ function renderListView(recommendations, container) {
             <div class="recommendation-card${expiredClass}">
                 <div class="recommendation-header">
                     <div class="recommendation-member">
-                        <span class="member-name">${escapeHtml(rec.member_name)}</span>
+                        <span class="member-name">${escapeHtml(rec.member_name)}${rec.member_nickname ? '<span class="member-nickname"> aka ' + escapeHtml(rec.member_nickname) + '</span>' : ''}</span>
                         <span class="member-rank rank-${rec.member_rank}">${rec.member_rank}</span>
                         ${expiredBadge}
                     </div>
@@ -267,6 +267,7 @@ function renderGroupedView(recommendations, container) {
             grouped[rec.member_id] = {
                 member_name: rec.member_name,
                 member_rank: rec.member_rank,
+                member_nickname: rec.member_nickname || null,
                 recommendations: []
             };
         }
@@ -287,7 +288,7 @@ function renderGroupedView(recommendations, container) {
             <div class="grouped-card">
                 <div class="grouped-header">
                     <div class="grouped-member-info">
-                        <span class="member-name-large">${escapeHtml(group.member_name)}</span>
+                        <span class="member-name-large">${escapeHtml(group.member_name)}${group.member_nickname ? '<span class="member-nickname"> aka ' + escapeHtml(group.member_nickname) + '</span>' : ''}</span>
                         <span class="member-rank rank-${group.member_rank}">${group.member_rank}</span>
                     </div>
                     <div class="grouped-badges">
