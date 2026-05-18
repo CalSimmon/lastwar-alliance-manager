@@ -1,5 +1,64 @@
 # Quick Production Setup Guide
 
+## Local Development & Testing
+
+Run the app locally with Docker and validate it with the included Playwright test suite. No Go, GCC, or Tesseract installation required.
+
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/) with Compose v2
+- [Node.js](https://nodejs.org/) (for Playwright)
+
+### 1. Build and Start
+
+```bash
+docker compose up -d --build
+```
+
+App is now at **http://localhost:8080**. Default credentials: `admin` / `admin123`.
+
+### 2. Set Up Playwright
+
+```bash
+cd playwright-tests
+npm install
+npx playwright install chromium
+```
+
+### 3. Run the Tests
+
+```bash
+npx playwright test        # headless (CI-friendly)
+npm test                   # same thing via npm script
+npx playwright test --headed   # show browser window
+```
+
+The test runner logs in automatically via `global-setup.js` — no manual login needed.
+
+### 4. View the HTML Report
+
+```bash
+npm run report
+# opens playwright-tests/report/index.html
+```
+
+Screenshots from each run are saved to `playwright-tests/screenshots/`.
+
+### Iterate: Rebuild and Retest
+
+```bash
+docker compose up -d --build   # rebuild image after code changes
+cd playwright-tests && npx playwright test
+```
+
+### Test Files
+
+| File | Coverage |
+|---|---|
+| `tests/app.spec.js` | Login, members, train schedule, awards, navigation |
+| `tests/vs-ocr.spec.js` | VS Points OCR upload (auto-skips if screenshot not present) |
+
+---
+
 ## Option 1: Docker / Podman (Fastest — Recommended)
 
 No Go, GCC, or Tesseract needed on the host.

@@ -45,3 +45,8 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+# Playwright
+playwright-tests/auth.json
+playwright-tests/test-results/
+playwright-tests/report/

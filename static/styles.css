@@ -1161,6 +1161,23 @@ main.sidebar-collapsed {
     box-shadow: var(--shadow-focus);
 }
 
+/* Standalone input/select outside a form-group (e.g. filter bars) */
+.form-control {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    transition: border-color 0.2s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-focus);
+}
+
 .button-group {
     display: flex;
     gap: 10px;
@@ -3380,6 +3397,11 @@ button {
 .recommendation-item.expired-rec {
     border-left-color: var(--bs-success);
     opacity: 0.8;
+}
+
+.recommendation-item.trial-expired {
+    border-left-color: var(--accent-danger, #dc2626);
+    opacity: 0.9;
 }
 
 .rec-item-header {
@@ -5797,6 +5819,13 @@ button {
     opacity: 1;
 }
 
+.loading-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+    font-size: 1em;
+}
+
 .loading {
     text-align: center;
     padding: 40px;
@@ -7060,6 +7089,34 @@ section:last-child {
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
+}
+
+/* Info banner */
+.info-banner {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.info-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.info-icon {
+    font-size: 1.2em;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.info-text {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+    line-height: 1.5;
 }
 
 /* Info banner variants */

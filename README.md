@@ -183,6 +183,64 @@ go build -o alliance-manager main.go
 
 Or use the systemd service (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
+## Local Testing
+
+The test suite is built with [Playwright](https://playwright.dev/) and runs against a live local instance. The fastest way to get a working local instance is Docker.
+
+### 1. Start the App
+
+```bash
+docker compose up -d --build
+```
+
+The app is now at `http://localhost:8080`. Default credentials: `admin` / `admin123`.
+
+### 2. Install Playwright
+
+```bash
+cd playwright-tests
+npm install
+npx playwright install chromium
+```
+
+### 3. Run the Tests
+
+```bash
+# All tests (headless)
+npx playwright test
+# or
+npm test
+
+# Single spec
+npx playwright test tests/app.spec.js
+
+# Show browser window while running
+npx playwright test --headed
+```
+
+### 4. View the HTML Report
+
+```bash
+npm run report
+# opens playwright-tests/report/index.html in a local server
+```
+
+### Test Files
+
+| File | What it covers |
+|---|---|
+| `tests/app.spec.js` | Login flow, member CRUD, train schedule, awards, settings, navigation |
+| `tests/vs-ocr.spec.js` | VS Points OCR upload — requires a local screenshot file (see comments in the file) |
+
+> **Tip:** `tests/vs-ocr.spec.js` automatically skips if the required screenshot is not present, so it will not block CI or general test runs.
+
+### Rebuilding After Code Changes
+
+```bash
+docker compose up -d --build   # rebuild image and restart container
+npx playwright test            # re-run tests against the updated container
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
