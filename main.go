@@ -195,6 +195,22 @@ type AdminUserResponse struct {
 	RecentLogins []LoginSession `json:"recent_logins,omitempty"`
 }
 
+type Applicant struct {
+	ID              int     `json:"id"`
+	Name            string  `json:"name"`
+	Power           *int64  `json:"power,omitempty"`
+	Rank            *string `json:"rank,omitempty"`
+	VouchedBy       *string `json:"vouched_by,omitempty"`
+	Status          string  `json:"status"` // pending, approved, rejected, on_trial
+	DecisionBy      *string `json:"decision_by,omitempty"`
+	AppliedAt       string  `json:"applied_at"`
+	DecidedAt       *string `json:"decided_at,omitempty"`
+	TrialEndDate    *string `json:"trial_end_date,omitempty"`
+	Notes           *string `json:"notes,omitempty"`
+	RejectionReason *string `json:"rejection_reason,omitempty"`
+	MemberID        *int    `json:"member_id,omitempty"`
+}
+
 type Settings struct {
 	ID                           int    `json:"id"`
 	AllianceName                 string `json:"alliance_name"`       // Full alliance name (e.g., "Reset Reapers")
@@ -216,6 +232,8 @@ type Settings struct {
 	DisplayTimezones             string `json:"display_timezones"`
 	VSPointsDailyTarget          int    `json:"vs_points_daily_target"`
 	VSPointsWeeklyTarget         int    `json:"vs_points_weekly_target"`
+	MinPower                     int    `json:"min_power"`
+	MinHQLevel                   int    `json:"min_hq_level"`
 }
 
 type MemberRanking struct {
@@ -1623,6 +1641,48 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added member_name_snapshot column to dyno_recommendations table")
+	}
+
+	// Create applicants table (recruitment tracker)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS applicants (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		power INTEGER,
+		rank TEXT,
+		vouched_by TEXT,
+		status TEXT NOT NULL DEFAULT 'pending',
+		decision_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		decided_at TIMESTAMP,
+		trial_end_date DATE,
+		notes TEXT,
+		rejection_reason TEXT,
+		member_id INTEGER REFERENCES members(id) ON DELETE SET NULL
+	)`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate settings table to add min_power column if missing
+	var minPowerColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='min_power'`).Scan(&minPowerColumnExists)
+	if err != nil || !minPowerColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN min_power INTEGER NOT NULL DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added min_power column to settings table")
+	}
+
+	// Migrate settings table to add min_hq_level column if missing
+	var minHQColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='min_hq_level'`).Scan(&minHQColumnExists)
+	if err != nil || !minHQColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN min_hq_level INTEGER NOT NULL DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added min_hq_level column to settings table")
 	}
 
 	return nil
@@ -4381,7 +4441,9 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		COALESCE(backup_time, '16:30') as backup_time,
 		COALESCE(display_timezones, '["Europe/London"]') as display_timezones,
 		COALESCE(vs_points_daily_target, 0) as vs_points_daily_target,
-		COALESCE(vs_points_weekly_target, 0) as vs_points_weekly_target
+		COALESCE(vs_points_weekly_target, 0) as vs_points_weekly_target,
+		COALESCE(min_power, 0) as min_power,
+		COALESCE(min_hq_level, 0) as min_hq_level
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AllianceName,
@@ -4403,6 +4465,8 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		&settings.DisplayTimezones,
 		&settings.VSPointsDailyTarget,
 		&settings.VSPointsWeeklyTarget,
+		&settings.MinPower,
+		&settings.MinHQLevel,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -4450,7 +4514,9 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		backup_time = ?,
 		display_timezones = ?,
 		vs_points_daily_target = ?,
-		vs_points_weekly_target = ?
+		vs_points_weekly_target = ?,
+		min_power = ?,
+		min_hq_level = ?
 		WHERE id = 1`,
 		settings.AllianceName,
 		settings.AllianceShortName,
@@ -4471,6 +4537,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.DisplayTimezones,
 		settings.VSPointsDailyTarget,
 		settings.VSPointsWeeklyTarget,
+		settings.MinPower,
+		settings.MinHQLevel,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -4678,6 +4746,275 @@ func luckyDraw(w http.ResponseWriter, r *http.Request) {
 		"eligible":  eligible,
 		"pool_size": len(eligible),
 	})
+}
+
+// isOfficerOrAdmin checks if the caller is R4, R5, or admin
+func isOfficerOrAdmin(r *http.Request) bool {
+	session, _ := store.Get(r, "session")
+	if isAdmin, ok := session.Values["is_admin"].(bool); ok && isAdmin {
+		return true
+	}
+	if memberID, ok := session.Values["member_id"].(int); ok {
+		var rank string
+		if err := db.QueryRow("SELECT rank FROM members WHERE id = ? AND deleted_at IS NULL", memberID).Scan(&rank); err == nil {
+			return rank == "R4" || rank == "R5"
+		}
+	}
+	return false
+}
+
+// GET /api/applicants — list all applicants
+// rejection_reason is stripped unless caller is officer/admin
+func getApplicants(w http.ResponseWriter, r *http.Request) {
+	showRejectionReason := isOfficerOrAdmin(r)
+
+	rows, err := db.Query(`
+		SELECT a.id, a.name, a.power, a.rank, a.vouched_by, a.status,
+		       u.username, a.applied_at, a.decided_at, a.trial_end_date,
+		       a.notes, a.rejection_reason, a.member_id
+		FROM applicants a
+		LEFT JOIN users u ON u.id = a.decision_by_id
+		ORDER BY CASE a.status
+			WHEN 'pending'  THEN 1
+			WHEN 'on_trial' THEN 2
+			WHEN 'approved' THEN 3
+			WHEN 'rejected' THEN 4
+			ELSE 5 END, a.applied_at DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	applicants := make([]Applicant, 0)
+	for rows.Next() {
+		var a Applicant
+		var power sql.NullInt64
+		var rank, vouchedBy, decisionBy, decidedAt, trialEnd, notes, rejReason sql.NullString
+		var memberID sql.NullInt64
+		if err := rows.Scan(&a.ID, &a.Name, &power, &rank, &vouchedBy, &a.Status,
+			&decisionBy, &a.AppliedAt, &decidedAt, &trialEnd,
+			&notes, &rejReason, &memberID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if power.Valid {
+			v := power.Int64
+			a.Power = &v
+		}
+		if rank.Valid {
+			a.Rank = &rank.String
+		}
+		if vouchedBy.Valid {
+			a.VouchedBy = &vouchedBy.String
+		}
+		if decisionBy.Valid {
+			a.DecisionBy = &decisionBy.String
+		}
+		if decidedAt.Valid {
+			a.DecidedAt = &decidedAt.String
+		}
+		if trialEnd.Valid {
+			a.TrialEndDate = &trialEnd.String
+		}
+		if notes.Valid {
+			a.Notes = &notes.String
+		}
+		if rejReason.Valid && showRejectionReason {
+			a.RejectionReason = &rejReason.String
+		}
+		if memberID.Valid {
+			mid := int(memberID.Int64)
+			a.MemberID = &mid
+		}
+		applicants = append(applicants, a)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(applicants)
+}
+
+// POST /api/applicants — create applicant (officers/admin)
+func createApplicant(w http.ResponseWriter, r *http.Request) {
+	var a Applicant
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	a.Name = strings.TrimSpace(a.Name)
+	if a.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if a.Status == "" {
+		a.Status = "pending"
+	}
+
+	result, err := db.Exec(`INSERT INTO applicants (name, power, rank, vouched_by, status, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+		a.Name,
+		nullableInt64(a.Power),
+		nullableString(a.Rank),
+		nullableString(a.VouchedBy),
+		a.Status,
+		nullableString(a.Notes),
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := result.LastInsertId()
+	a.ID = int(id)
+
+	// Fetch applied_at
+	db.QueryRow("SELECT applied_at FROM applicants WHERE id = ?", a.ID).Scan(&a.AppliedAt)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(a)
+}
+
+// PUT /api/applicants/{id} — update applicant fields (officers/admin)
+func updateApplicant(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid id", http.StatusBadRequest)
+		return
+	}
+	var a Applicant
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	a.Name = strings.TrimSpace(a.Name)
+	if a.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec(`UPDATE applicants SET name=?, power=?, rank=?, vouched_by=?, notes=? WHERE id=?`,
+		a.Name,
+		nullableInt64(a.Power),
+		nullableString(a.Rank),
+		nullableString(a.VouchedBy),
+		nullableString(a.Notes),
+		id,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.ID = id
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(a)
+}
+
+// PUT /api/applicants/{id}/status — set status, decision info (officers/admin)
+func updateApplicantStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Status          string  `json:"status"`
+		TrialEndDate    *string `json:"trial_end_date,omitempty"`
+		RejectionReason *string `json:"rejection_reason,omitempty"`
+		MemberID        *int    `json:"member_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	valid := map[string]bool{"pending": true, "approved": true, "rejected": true, "on_trial": true}
+	if !valid[req.Status] {
+		http.Error(w, "status must be pending, approved, rejected, or on_trial", http.StatusBadRequest)
+		return
+	}
+
+	// Determine decision_by_id from session
+	session, _ := store.Get(r, "session")
+	var decisionByID *int
+	if req.Status != "pending" {
+		if uid, ok := session.Values["user_id"].(int); ok {
+			decisionByID = &uid
+		}
+	}
+
+	var decidedAt *string
+	if req.Status != "pending" {
+		now := time.Now().UTC().Format(time.RFC3339)
+		decidedAt = &now
+	}
+
+	_, err = db.Exec(`UPDATE applicants SET status=?, decision_by_id=?, decided_at=?, trial_end_date=?, rejection_reason=?, member_id=? WHERE id=?`,
+		req.Status,
+		nullableIntPtr(decisionByID),
+		nullableStringPtr(decidedAt),
+		nullableStringPtr(req.TrialEndDate),
+		nullableStringPtr(req.RejectionReason),
+		nullableIntPtr(req.MemberID),
+		id,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": req.Status})
+}
+
+// DELETE /api/applicants/{id} — delete applicant (R5/admin)
+func deleteApplicant(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid id", http.StatusBadRequest)
+		return
+	}
+	_, err = db.Exec("DELETE FROM applicants WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Applicant deleted"})
+}
+
+// Helper: nullable int64 from pointer
+func nullableInt64(v *int64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// Helper: nullable string from pointer
+func nullableString(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// Helper: nullable int from int pointer
+func nullableIntPtr(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// Helper: nullable string from string pointer
+func nullableStringPtr(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // Get member rankings with detailed score breakdown
@@ -7743,6 +8080,13 @@ func main() {
 	router.HandleFunc("/api/settings/backup-rotation", authMiddleware(rankManagementMiddleware(saveBackupRotation))).Methods("PUT")
 	router.HandleFunc("/api/settings/train-week-mode", authMiddleware(getTrainWeekMode)).Methods("GET")
 	router.HandleFunc("/api/settings/train-week-mode", authMiddleware(rankManagementMiddleware(setTrainWeekMode))).Methods("PUT")
+
+	// Applicant/Recruitment routes (protected)
+	router.HandleFunc("/api/applicants", authMiddleware(getApplicants)).Methods("GET")
+	router.HandleFunc("/api/applicants", authMiddleware(rankManagementMiddleware(createApplicant))).Methods("POST")
+	router.HandleFunc("/api/applicants/{id}/status", authMiddleware(rankManagementMiddleware(updateApplicantStatus))).Methods("PUT")
+	router.HandleFunc("/api/applicants/{id}", authMiddleware(rankManagementMiddleware(updateApplicant))).Methods("PUT")
+	router.HandleFunc("/api/applicants/{id}", authMiddleware(adminR5Middleware(deleteApplicant))).Methods("DELETE")
 
 	// Rankings routes (protected)
 	router.HandleFunc("/api/rankings", authMiddleware(getMemberRankings)).Methods("GET")

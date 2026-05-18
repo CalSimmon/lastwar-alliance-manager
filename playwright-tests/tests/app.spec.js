@@ -83,6 +83,16 @@ const PAGES = [
   { name: 'Admin', path: '/admin.html', slug: '12-admin', keySelectors: ['main, section, .container'] },
   { name: 'Graveyard', path: '/graveyard.html', slug: '13-graveyard', keySelectors: ['main, section, table'] },
   { name: 'Profile', path: '/profile.html', slug: '14-profile', keySelectors: ['main, section, .container'] },
+  {
+    name: 'Recruit', path: '/recruit.html', slug: '15-recruit',
+    keySelectors: ['main, section, .form-section'],
+    extraChecks: async (page) => {
+      await expect(page.locator('#status-filter')).toBeVisible();
+      await expect(page.locator('#applicant-list')).toBeVisible();
+      // add button visible because we're logged in as admin (officer)
+      await expect(page.locator('#add-applicant-btn')).toBeVisible();
+    },
+  },
 ];
 
 for (const pg of PAGES) {
@@ -220,5 +230,41 @@ test.describe('API smoke tests', () => {
     const res = await apiGet(request, '/api/rankings');
     expect(res.status()).toBe(200);
     expect(Array.isArray((await res.json()).rankings)).toBeTruthy();
+  });
+  test('GET /api/applicants returns array', async ({ request }) => {
+    const res = await apiGet(request, '/api/applicants');
+    expect(res.status()).toBe(200);
+    expect(Array.isArray(await res.json())).toBeTruthy();
+  });
+  test('POST /api/applicants creates and DELETE removes', async ({ request }) => {
+    const createRes = await request.post('http://localhost:8080/api/applicants', {
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      data: { name: 'TestApplicant_PW', power: 3000000, rank: 'R2', status: 'pending' },
+    });
+    expect(createRes.status()).toBe(201);
+    const created = await createRes.json();
+    expect(created.id).toBeGreaterThan(0);
+    expect(created.name).toBe('TestApplicant_PW');
+
+    // Status update
+    const statusRes = await request.put(`http://localhost:8080/api/applicants/${created.id}/status`, {
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      data: { status: 'on_trial', trial_end_date: '2099-12-31' },
+    });
+    expect(statusRes.status()).toBe(200);
+    expect((await statusRes.json()).status).toBe('on_trial');
+
+    // Cleanup
+    const delRes = await request.delete(`http://localhost:8080/api/applicants/${created.id}`, {
+      headers: { Cookie: cookieHeader },
+    });
+    expect(delRes.status()).toBe(200);
+  });
+  test('GET /api/settings has min_power field', async ({ request }) => {
+    const res = await apiGet(request, '/api/settings');
+    expect(res.status()).toBe(200);
+    const s = await res.json();
+    expect(typeof s.min_power).toBe('number');
+    expect(typeof s.min_hq_level).toBe('number');
   });
 });

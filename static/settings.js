@@ -130,6 +130,10 @@ async function loadSettings() {
         document.getElementById('vs-daily-target').value = settings.vs_points_daily_target || 0;
         document.getElementById('vs-weekly-target').value = settings.vs_points_weekly_target || 0;
 
+        // Recruitment requirements
+        document.getElementById('min-power').value = settings.min_power || 0;
+        document.getElementById('min-hq-level').value = settings.min_hq_level || 0;
+
         // Power tracking
         const powerTrackingEnabled = settings.power_tracking_enabled || false;
         document.getElementById('power-tracking-enabled').checked = powerTrackingEnabled;
@@ -163,6 +167,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         daily_message_template: document.getElementById('daily-message-template').value,
         vs_points_daily_target: parseInt(document.getElementById('vs-daily-target').value) || 0,
         vs_points_weekly_target: parseInt(document.getElementById('vs-weekly-target').value) || 0,
+        min_power: parseInt(document.getElementById('min-power').value) || 0,
+        min_hq_level: parseInt(document.getElementById('min-hq-level').value) || 0,
         power_tracking_enabled: document.getElementById('power-tracking-enabled').checked,
         server_timezone: document.getElementById('server-timezone').value,
         conductor_time: document.getElementById('conductor-time').value,

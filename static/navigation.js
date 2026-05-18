@@ -54,6 +54,7 @@
                 <a href="/vs-compliance.html" class="nav-link">📋 VS Compliance</a>
                 <a href="/upload.html" class="nav-link">📸 Upload</a>
                 <a href="/settings.html" class="nav-link">⚙️ Settings</a>
+                <a href="/recruit.html" class="nav-link">🎯 Recruit</a>
                 <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin</a>
                 <a href="/graveyard.html" class="nav-link admin-link" id="graveyard-nav-link" style="display: none;">🪦 Graveyard</a>
             </div>
