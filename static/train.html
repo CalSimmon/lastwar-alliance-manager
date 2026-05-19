@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
+    <script src="common.js"></script>
     <script src="navigation.js"></script>
 </head>
 <body data-h1="🚂 Last War: Survival" data-subtitle="Supply runs. Show up or prepare your excuse.">
@@ -36,23 +37,23 @@
                     <button id="generate-daily-message-btn" class="primary-btn">📨 Generate Daily Message</button>
                     <button id="generate-conductor-messages-btn" class="primary-btn">👤 Generate Conductor Reminders</button>
                 </div>
-                <div id="week-mode-bar" style="display:flex; align-items:center; gap:14px; margin-top:12px; padding:10px 14px; background:var(--card-bg); border-radius:8px; border:1px solid var(--border-color);">
-                    <span style="font-weight:600; color:var(--text-primary);">Week Mode:</span>
-                    <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
-                        <input type="radio" name="week-mode" value="win" id="mode-win"> <span>🏆 Win Week <small style="color:var(--text-muted);">(normal auto-schedule)</small></span>
+                <div id="week-mode-bar">
+                    <span>Week Mode:</span>
+                    <label>
+                        <input type="radio" name="week-mode" value="win" id="mode-win"> <span>🏆 Win Week <small>(normal auto-schedule)</small></span>
                     </label>
-                    <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
-                        <input type="radio" name="week-mode" value="save" id="mode-save"> <span>🎰 Save Week <small style="color:var(--text-muted);">(lucky draw based on donations)</small></span>
+                    <label>
+                        <input type="radio" name="week-mode" value="save" id="mode-save"> <span>🎰 Save Week <small>(lucky draw based on donations)</small></span>
                     </label>
-                    <span id="week-mode-saved" style="font-size:12px; color:var(--text-muted); display:none;">✓ Saved</span>
+                    <span id="week-mode-saved" style="display:none;">✓ Saved</span>
                 </div>
-                <div id="lucky-draw-panel" style="display:none; margin-top:10px; padding:12px 14px; background:var(--card-bg); border-radius:8px; border:1px solid var(--border-color);">
-                    <p style="margin:0 0 10px; color:var(--text-muted); font-size:13px;">🎰 Save Week: draw a lucky conductor (60k+ donations) and VIP (40k+ donations) for this week.</p>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button id="draw-conductor-btn" class="primary-btn" style="padding:8px 16px;">🎲 Draw Conductor</button>
-                        <button id="draw-vip-btn" class="primary-btn" style="padding:8px 16px;">🎲 Draw VIP</button>
+                <div id="lucky-draw-panel" style="display:none;">
+                    <p class="lucky-draw-info">🎰 Save Week: draw a lucky conductor (60k+ donations) and VIP (40k+ donations) for this week.</p>
+                    <div class="lucky-draw-actions">
+                        <button id="draw-conductor-btn" class="primary-btn">🎲 Draw Conductor</button>
+                        <button id="draw-vip-btn" class="primary-btn">🎲 Draw VIP</button>
                     </div>
-                    <div id="draw-result" style="margin-top:10px;"></div>
+                    <div id="draw-result"></div>
                 </div>
             </section>
 
@@ -95,6 +96,10 @@
             </section>
 
             <section class="schedule-section">
+                <div class="schedule-view-toggle">
+                    <button id="view-cards-btn" class="view-toggle-btn active" title="Card view">📊 Cards</button>
+                    <button id="view-list-btn" class="view-toggle-btn" title="List view">📋 List</button>
+                </div>
                 <div id="schedule-grid" class="schedule-grid">
                     <p class="loading">⏳ Assembling the convoy...</p>
                 </div>
@@ -142,7 +147,7 @@
                     <select id="backup-select" required size="5">
                         <option value="">Select Backup</option>
                     </select>
-                    <div id="rotation-hint" style="display:none; margin-top:6px; font-size:12px; color:var(--accent-primary);"></div>
+                    <div id="rotation-hint" style="display:none;"></div>
                 </div>
 
                 <div class="form-group">

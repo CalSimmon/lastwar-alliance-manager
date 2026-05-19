@@ -1,0 +1,35 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "script"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "no-undef": "warn",
+    "eqeqeq": ["error", "always"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-var": "warn",
+    "prefer-const": "warn",
+    "curly": ["warn", "multi-line"],
+    "no-throw-literal": "error",
+    "no-return-assign": "error",
+    "no-self-compare": "error",
+    "no-template-curly-in-string": "warn"
+  },
+  "globals": {
+    "showToast": "readonly",
+    "setButtonLoading": "readonly",
+    "clearButtonLoading": "readonly",
+    "API_BASE": "readonly",
+    "toggleUserDropdown": "readonly",
+    "handleLogout": "readonly",
+    "escapeHtml": "readonly"
+  }
+}

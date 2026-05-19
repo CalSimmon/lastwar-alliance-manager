@@ -12,6 +12,7 @@ let currentUsername = '';
 let currentUserRank = '';
 let isAdmin = false;
 let vipSeatEnabled = true;
+let scheduleViewMode = localStorage.getItem('trainViewMode') || 'cards';
 
 // Return member nickname or null by member ID from allMembers
 function nickByID(id) {
@@ -36,6 +37,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         currentUsername = data.username;
         currentUserRank = data.rank || '';
@@ -402,7 +404,7 @@ async function loadSchedules() {
             schedules[schedule.date] = schedule;
         });
         
-        renderScheduleGrid();
+        renderSchedule();
     } catch (error) {
         console.error('Error loading schedules:', error);
         document.getElementById('schedule-grid').innerHTML = 
@@ -410,7 +412,75 @@ async function loadSchedules() {
     }
 }
 
-// Render schedule grid
+// Render schedule in the active view mode
+function renderSchedule() {
+    if (scheduleViewMode === 'list') {
+        renderScheduleList();
+    } else {
+        renderScheduleGrid();
+    }
+}
+
+// Render compact list/table view
+function renderScheduleList() {
+    const grid = document.getElementById('schedule-grid');
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    
+    let html = '<table class="schedule-list-table"><thead><tr>';
+    html += '<th>Day</th><th>Conductor</th><th>Backup</th>';
+    if (vipSeatEnabled) html += '<th>VIP</th>';
+    html += '<th>Status</th>';
+    if (canEditSchedule()) html += '<th></th>';
+    html += '</tr></thead><tbody>';
+    
+    for (let i = 0; i < 7; i++) {
+        const date = new Date(currentWeekStart);
+        date.setDate(date.getDate() + i);
+        const dateStr = formatDate(date);
+        const schedule = schedules[dateStr];
+        const isPast = date < new Date(new Date().setHours(0, 0, 0, 0));
+        
+        html += `<tr class="${isPast ? 'past-row' : ''}">`;
+        html += `<td class="list-day-cell"><strong>${days[i]}</strong> <span class="list-date">${date.getDate()}/${date.getMonth() + 1}</span></td>`;
+        
+        if (schedule) {
+            html += `<td>${nameNick(schedule.conductor_name, nickByID(schedule.conductor_id))}`;
+            if (schedule.conductor_score != null) html += ` <span class="score-badge">${schedule.conductor_score}</span>`;
+            html += `</td>`;
+            html += `<td>${nameNick(schedule.backup_name, nickByID(schedule.backup_id))}`;
+            if (schedule.conductor_showed_up === false) {
+                html += schedule.actual_conductor_id
+                    ? ` <span class="status-badge info">→ ${nameNick(schedule.actual_conductor_name, nickByID(schedule.actual_conductor_id))}</span>`
+                    : ' <span class="status-badge active">🚂</span>';
+            }
+            html += `</td>`;
+            if (vipSeatEnabled) html += `<td>${schedule.vip_name ? nameNick(schedule.vip_name, nickByID(schedule.vip_id)) : '—'}</td>`;
+            
+            let statusHtml = '';
+            if (schedule.conductor_showed_up === true) statusHtml = '<span class="status-badge success">✓</span>';
+            else if (schedule.conductor_showed_up === false) statusHtml = '<span class="status-badge warning">✗</span>';
+            else statusHtml = '<span class="status-badge info">—</span>';
+            html += `<td>${statusHtml}</td>`;
+            
+            if (canEditSchedule()) {
+                html += `<td class="list-actions"><button class="edit-schedule-btn" onclick="editSchedule('${dateStr}')">✏️</button> <button class="clear-schedule-btn" onclick="clearSchedule(${schedule.id}, '${dateStr}')">🗑️</button></td>`;
+            }
+        } else {
+            const emptySpan = vipSeatEnabled ? 3 : 2;
+            html += `<td colspan="${emptySpan}" class="list-empty">Not scheduled</td>`;
+            html += `<td>—</td>`;
+            if (canEditSchedule()) {
+                html += `<td class="list-actions"><button class="schedule-btn" onclick="openScheduleModal('${dateStr}')">✏️</button></td>`;
+            }
+        }
+        html += '</tr>';
+    }
+    
+    html += '</tbody></table>';
+    grid.innerHTML = html;
+}
+
+// Render schedule card grid
 function renderScheduleGrid() {
     const grid = document.getElementById('schedule-grid');
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -1101,6 +1171,34 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ---- Schedule view toggle (cards / list) ----
+function initViewToggle() {
+    const cardsBtn = document.getElementById('view-cards-btn');
+    const listBtn = document.getElementById('view-list-btn');
+    if (!cardsBtn || !listBtn) return;
+
+    // Reflect stored preference
+    if (scheduleViewMode === 'list') {
+        cardsBtn.classList.remove('active');
+        listBtn.classList.add('active');
+    }
+
+    cardsBtn.addEventListener('click', () => {
+        scheduleViewMode = 'cards';
+        localStorage.setItem('trainViewMode', 'cards');
+        cardsBtn.classList.add('active');
+        listBtn.classList.remove('active');
+        renderSchedule();
+    });
+    listBtn.addEventListener('click', () => {
+        scheduleViewMode = 'list';
+        localStorage.setItem('trainViewMode', 'list');
+        listBtn.classList.add('active');
+        cardsBtn.classList.remove('active');
+        renderSchedule();
+    });
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     const isAuthenticated = await checkAuth();
@@ -1121,6 +1219,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadSchedules();
         await loadHistory();
         await initWeekMode();
+        initViewToggle();
         
         // Setup editing controls based on permissions
         if (canEditSchedule()) {

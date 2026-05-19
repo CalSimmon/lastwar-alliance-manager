@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+// VS Points page
 
 const DAY_KEYS  = ['monday','tuesday','wednesday','thursday','friday','saturday'];
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -26,6 +26,7 @@ async function checkAuth() {
         if (!res.ok) { window.location.href = '/login.html'; return false; }
         const data = await res.json();
         if (!data.authenticated) { window.location.href = '/login.html'; return false; }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         if (data.is_admin) {
             const al = document.getElementById('admin-dropdown-link');

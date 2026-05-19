@@ -18,6 +18,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         currentUsername = data.username;
         currentUserId = data.user_id || 0;
@@ -185,6 +186,21 @@ function updateStatistics() {
     document.getElementById('members-recommended').textContent = uniqueMembers.size;
     document.getElementById('top-recommended').textContent = topMemberText;
     document.getElementById('assigned-count').textContent = assigned.length;
+
+    // Show empty-state hint when no data
+    const statsSection = document.querySelector('.stats-dashboard');
+    let emptyHint = statsSection.querySelector('.stats-empty-hint');
+    if (active.length === 0 && assigned.length === 0) {
+        if (!emptyHint) {
+            emptyHint = document.createElement('p');
+            emptyHint.className = 'stats-empty-hint';
+            emptyHint.style.cssText = 'text-align:center; color:var(--text-muted); margin-top:12px; font-size:0.9em;';
+            emptyHint.textContent = '🚂 No recommendations yet — use the form below to nominate a conductor.';
+            statsSection.appendChild(emptyHint);
+        }
+    } else if (emptyHint) {
+        emptyHint.remove();
+    }
 }
 
 // Render recommendations

@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
+    <script src="common.js"></script>
     <script src="navigation.js"></script>
 </head>
 <body data-h1="🎯 Last War: Survival" data-subtitle="Applicant pipeline. Vetting the worthy since we got tired of carrying passengers.">
@@ -21,10 +22,10 @@
             </section>
 
             <section class="form-section">
-                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
-                    <h3 style="margin:0;">🎯 Applicants</h3>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                        <select id="status-filter" class="form-control" style="min-width:140px;">
+                <div class="applicant-header">
+                    <h3>🎯 Applicants</h3>
+                    <div class="applicant-controls">
+                        <select id="status-filter" class="form-control">
                             <option value="all">All statuses</option>
                             <option value="pending" selected>Pending</option>
                             <option value="on_trial">On Trial</option>
@@ -45,11 +46,11 @@
 
     <!-- Add/Edit Modal -->
     <div id="applicant-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="max-width:540px;">
+        <div class="modal-content">
             <h3 id="modal-title">Add Applicant</h3>
             <form id="applicant-form">
                 <div class="form-group">
-                    <label for="modal-name">Name <span style="color:var(--accent-danger)">*</span></label>
+                    <label for="modal-name">Name <span class="required-mark">*</span></label>
                     <input type="text" id="modal-name" required maxlength="100" placeholder="In-game name">
                 </div>
                 <div class="form-group">
@@ -83,10 +84,10 @@
                     <input type="date" id="modal-trial-end">
                 </div>
                 <div class="form-group officer-only" id="modal-rejection-group" style="display:none;">
-                    <label for="modal-rejection">Rejection reason <span style="font-size:0.8em; color:var(--text-muted);">(officers only)</span></label>
+                    <label for="modal-rejection">Rejection reason <span class="officer-hint">(officers only)</span></label>
                     <textarea id="modal-rejection" rows="2" placeholder="Private — not visible to regular members"></textarea>
                 </div>
-                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                <div class="modal-footer">
                     <button type="button" id="modal-cancel-btn" class="secondary-btn">Cancel</button>
                     <button type="submit" id="modal-save-btn" class="primary-btn">Save</button>
                 </div>
@@ -96,7 +97,7 @@
 
     <!-- Status change modal -->
     <div id="status-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="max-width:440px;">
+        <div class="modal-content">
             <h3 id="status-modal-title">Change Status</h3>
             <div class="form-group">
                 <label for="status-select">New status</label>
@@ -112,10 +113,10 @@
                 <input type="date" id="status-trial-end">
             </div>
             <div class="form-group officer-only" id="status-rejection-group" style="display:none;">
-                <label for="status-rejection">Rejection reason <span style="font-size:0.8em; color:var(--text-muted);">(officers only)</span></label>
+                <label for="status-rejection">Rejection reason <span class="officer-hint">(officers only)</span></label>
                 <textarea id="status-rejection" rows="2"></textarea>
             </div>
-            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+            <div class="modal-footer">
                 <button type="button" id="status-cancel-btn" class="secondary-btn">Cancel</button>
                 <button type="button" id="status-confirm-btn" class="primary-btn">Apply</button>
             </div>

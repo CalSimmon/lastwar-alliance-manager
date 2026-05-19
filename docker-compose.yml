@@ -12,7 +12,7 @@ services:
       - ./data:/data
     environment:
       DATABASE_PATH: /data/alliance.db
-      # Set a strong random hex string here to keep sessions valid across restarts.
+      # Set SESSION_KEY via .env file or shell environment.
       # Generate one with: openssl rand -hex 32
-      SESSION_KEY: ""
+      SESSION_KEY: "${SESSION_KEY}"
     restart: unless-stopped

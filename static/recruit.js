@@ -17,10 +17,28 @@ async function checkAuth() {
     if (!res.ok) { window.location.href = '/login.html'; return false; }
     const data = await res.json();
     if (!data.authenticated) { window.location.href = '/login.html'; return false; }
+    if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
 
     const rank = data.rank || '';
     isOfficer = data.is_admin || rank === 'R4' || rank === 'R5';
     isR5Admin = data.is_admin || rank === 'R5';
+
+    let displayText = `👤 ${data.username}`;
+    if (rank) displayText += ` (${rank})`;
+    const usernameDisplay = document.getElementById('username-display');
+    if (usernameDisplay) {
+        usernameDisplay.textContent = displayText;
+        usernameDisplay.addEventListener('click', () => {
+            const dropdown = document.getElementById('user-dropdown-menu');
+            if (dropdown) dropdown.classList.toggle('show');
+        });
+    }
+
+    // Show admin link in dropdown if user is admin
+    const adminDropdownLink = document.getElementById('admin-dropdown-link');
+    if (adminDropdownLink && data.is_admin) {
+        adminDropdownLink.style.display = 'block';
+    }
 
     if (isOfficer) {
         document.querySelectorAll('.officer-only').forEach(el => el.style.display = '');
@@ -231,11 +249,20 @@ document.getElementById('applicant-form').addEventListener('submit', async e => 
                     trial_end_date:    statusVal === 'on_trial' ? (document.getElementById('modal-trial-end').value || null) : null,
                     rejection_reason:  statusVal === 'rejected' ? (document.getElementById('modal-rejection').value.trim() || null) : null,
                 };
-                await fetch(`${API_APPLICANTS}/${editingID}/status`, {
+                const statusRes = await fetch(`${API_APPLICANTS}/${editingID}/status`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(statusBody),
                 });
+                if (statusRes.ok) {
+                    const statusData = await statusRes.json();
+                    if (statusData.member_created) {
+                        closeApplicantModal();
+                        showToast('Applicant updated. Added to member roster as R1 (not eligible for train).', 'success');
+                        await loadApplicants();
+                        return;
+                    }
+                }
             }
         }
 
@@ -270,32 +297,6 @@ function handleStatusModalChange(status) {
     document.getElementById('status-rejection-group').style.display = (status === 'rejected' && isOfficer) ? '' : 'none';
 }
 
-document.getElementById('status-select').addEventListener('change', e => handleStatusModalChange(e.target.value));
-document.getElementById('status-cancel-btn').addEventListener('click', closeStatusModal);
-
-document.getElementById('status-confirm-btn').addEventListener('click', async () => {
-    if (!statusTargetID) return;
-    const status = document.getElementById('status-select').value;
-    const body = {
-        status,
-        trial_end_date:   status === 'on_trial' ? (document.getElementById('status-trial-end').value || null) : null,
-        rejection_reason: status === 'rejected'  ? (document.getElementById('status-rejection').value.trim() || null) : null,
-    };
-    try {
-        const res = await fetch(`${API_APPLICANTS}/${statusTargetID}/status`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok) { const t = await res.text(); throw new Error(t); }
-        closeStatusModal();
-        showToast('Status updated.', 'success');
-        await loadApplicants();
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
-});
-
 // ─── Delete ───────────────────────────────────────────────────────────────────
 async function deleteApplicant(id, name) {
     const confirmed = await showConfirm(`Delete applicant "${name}"? This cannot be undone.`, 'Delete Applicant', 'Delete', 'Cancel', true);
@@ -310,20 +311,48 @@ async function deleteApplicant(id, name) {
     }
 }
 
-// ─── Event wiring ─────────────────────────────────────────────────────────────
-document.getElementById('add-applicant-btn').addEventListener('click', openAddModal);
-document.getElementById('status-filter').addEventListener('change', renderApplicants);
+// ─── Event wiring & Init ──────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('add-applicant-btn').addEventListener('click', openAddModal);
+    document.getElementById('status-filter').addEventListener('change', renderApplicants);
+    document.getElementById('status-select').addEventListener('change', e => handleStatusModalChange(e.target.value));
+    document.getElementById('status-cancel-btn').addEventListener('click', closeStatusModal);
+    document.getElementById('status-confirm-btn').addEventListener('click', async () => {
+        if (!statusTargetID) return;
+        const status = document.getElementById('status-select').value;
+        const body = {
+            status,
+            trial_end_date:   status === 'on_trial' ? (document.getElementById('status-trial-end').value || null) : null,
+            rejection_reason: status === 'rejected'  ? (document.getElementById('status-rejection').value.trim() || null) : null,
+        };
+        try {
+            const res = await fetch(`${API_APPLICANTS}/${statusTargetID}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) { const t = await res.text(); throw new Error(t); }
+            const data = await res.json();
+            closeStatusModal();
+            if (data.member_created) {
+                showToast('Status updated. Added to member roster as R1 (not eligible for train).', 'success');
+            } else {
+                showToast('Status updated.', 'success');
+            }
+            await loadApplicants();
+        } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+        }
+    });
 
-// Close modals on overlay click
-document.getElementById('applicant-modal').addEventListener('click', e => {
-    if (e.target === e.currentTarget) closeApplicantModal();
-});
-document.getElementById('status-modal').addEventListener('click', e => {
-    if (e.target === e.currentTarget) closeStatusModal();
-});
+    // Close modals on overlay click
+    document.getElementById('applicant-modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeApplicantModal();
+    });
+    document.getElementById('status-modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeStatusModal();
+    });
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
-(async () => {
     if (!await checkAuth()) return;
     await Promise.all([loadSettings(), loadApplicants()]);
-})();
+});

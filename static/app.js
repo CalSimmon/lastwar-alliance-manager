@@ -26,6 +26,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         currentUsername = data.username;
         canManageRanks = data.can_manage_ranks || false;
@@ -78,6 +79,11 @@ document.addEventListener('click', (event) => {
     
     if (dropdown && !usernameBtn?.contains(event.target) && !dropdown.contains(event.target)) {
         dropdown.classList.remove('show');
+    }
+
+    // Close member overflow menus when clicking outside
+    if (!event.target.closest('.member-overflow')) {
+        document.querySelectorAll('.member-overflow.open').forEach(el => el.classList.remove('open'));
     }
 });
 
@@ -194,10 +200,15 @@ function displayMembers(members) {
         if (canManageRanks) {
             actionsHtml = `
                 <div class="member-actions">
-                    <button class="edit-btn" onclick="editMember(${member.id})">Edit</button>
-                    <button class="delete-btn" onclick="deleteMember(${member.id}, '${escapeHtml(member.name)}')">Delete</button>
-                    ${isR5OrAdmin ? `<button class="create-user-btn" onclick="createUserForMember(${member.id}, '${escapeHtml(member.name)}')">Create User</button>` : ''}
-                    <button class="toggle-eligible-btn ${eligibleClass}" onclick="toggleEligible(${member.id}, ${member.eligible !== false})">${eligibleStatus}</button>
+                    <button class="toggle-eligible-btn ${eligibleClass}" onclick="toggleEligible(${member.id}, ${member.eligible !== false})" title="${eligibleStatus}">${eligibleStatus}</button>
+                    <div class="member-overflow">
+                        <button class="overflow-btn" onclick="this.parentElement.classList.toggle('open')" title="More actions">⋯</button>
+                        <div class="overflow-menu">
+                            <button class="overflow-item" onclick="editMember(${member.id})">✏️ Edit</button>
+                            <button class="overflow-item overflow-danger" onclick="deleteMember(${member.id}, '${escapeHtml(member.name)}')">🗑️ Delete</button>
+                            ${isR5OrAdmin ? `<button class="overflow-item" onclick="createUserForMember(${member.id}, '${escapeHtml(member.name)}')">👤 Create User</button>` : ''}
+                        </div>
+                    </div>
                 </div>
             `;
         }

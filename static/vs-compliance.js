@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+// VS Compliance page
 
 let complianceData = null;
 let activeWeekIdx = 0;   // 0 = most recent week
@@ -13,6 +13,7 @@ async function checkAuth() {
         const res = await fetch(`${API_BASE}/check-auth`);
         if (!res.ok) { window.location.href = '/login.html'; return false; }
         const data = await res.json();
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         if (data.is_admin) {
             const adminLink = document.getElementById('admin-dropdown-link');

@@ -1,6 +1,7 @@
-const API_BASE = '/api';
+// Profile page
 
 // Check authentication
+let mustChangePassword = false;
 async function checkAuth() {
     try {
         const response = await fetch(`${API_BASE}/check-auth`);
@@ -18,6 +19,18 @@ async function checkAuth() {
         if (data.rank) {
             document.getElementById('profile-member').textContent = data.rank;
             document.getElementById('profile-member-info').style.display = 'block';
+        }
+
+        mustChangePassword = data.must_change_password || false;
+        if (mustChangePassword) {
+            const banner = document.createElement('div');
+            banner.className = 'password-change-banner';
+            banner.innerHTML = '⚠️ <strong>You must change your password before continuing.</strong> Default credentials are not allowed.';
+            const main = document.querySelector('main');
+            if (main) main.prepend(banner);
+            // Scroll to password form
+            const pwForm = document.getElementById('password-form');
+            if (pwForm) pwForm.scrollIntoView({ behavior: 'smooth' });
         }
         
         return data;
@@ -120,6 +133,13 @@ document.getElementById('password-form').addEventListener('submit', async (e) =>
 
         showToast('Password changed successfully!', 'success');
         document.getElementById('password-form').reset();
+        if (mustChangePassword) {
+            mustChangePassword = false;
+            const banner = document.querySelector('.password-change-banner');
+            if (banner) banner.remove();
+            showToast('Password updated! Redirecting...', 'success');
+            setTimeout(() => { window.location.href = '/'; }, 1500);
+        }
     } catch (error) {
         console.error('Error changing password:', error);
         showToast('Failed to change password: ' + error.message, 'error');

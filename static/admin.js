@@ -7,6 +7,13 @@ let currentEditUserId = null;
 let currentResetUserId = null;
 let currentDeleteUserId = null;
 
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     // Check if user is admin
@@ -71,6 +78,7 @@ async function checkAdminAccess() {
             window.location.href = 'login.html';
             return;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return; }
         
         if (!data.is_admin) {
             showToast('Access Denied: Admin privileges required', 'error');
@@ -154,7 +162,7 @@ function displayUsers(users) {
     
     usersList.innerHTML = users.map(user => {
         const lastLogin = user.last_login ? new Date(user.last_login).toLocaleString() : 'Never';
-        const memberInfo = user.member_name ? `<span class="member-badge">${user.member_name}</span>` : '<span class="no-member">No member linked</span>';
+        const memberInfo = user.member_name ? `<span class="member-badge">${escapeHtml(user.member_name)}</span>` : '<span class="no-member">No member linked</span>';
         
         let recentLoginsHTML = '';
         if (user.recent_logins && user.recent_logins.length > 0) {
@@ -166,8 +174,8 @@ function displayUsers(users) {
                         const time = new Date(login.login_time).toLocaleString();
                         return `
                             <div class="login-entry">
-                                <span class="login-location">📍 ${location}</span>
-                                <span class="login-ip">${login.ip_address || 'N/A'}</span>
+                                <span class="login-location">📍 ${escapeHtml(location)}</span>
+                                <span class="login-ip">${escapeHtml(login.ip_address || 'N/A')}</span>
                                 <span class="login-time">${time}</span>
                             </div>
                         `;
@@ -181,15 +189,15 @@ function displayUsers(users) {
                 <div class="user-header">
                     <div class="user-info">
                         <h3>
-                            ${user.username}
+                            ${escapeHtml(user.username)}
                             ${user.is_admin ? '<span class="admin-badge">Admin</span>' : ''}
                         </h3>
                         ${memberInfo}
                     </div>
                     <div class="user-actions">
                         <button class="btn btn-sm btn-secondary" onclick="editUser(${user.id})">✏️ Edit</button>
-                        <button class="btn btn-sm btn-warning" onclick="showResetPasswordModal(${user.id}, '${user.username}')">🔑 Reset Password</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id}, '${user.username}')">🗑️ Delete</button>
+                        <button class="btn btn-sm btn-warning" onclick="showResetPasswordModal(${user.id}, '${escapeHtml(user.username)}')">🔑 Reset Password</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')">🗑️ Delete</button>
                     </div>
                 </div>
                 <div class="user-stats">
@@ -235,7 +243,7 @@ async function loadMembers() {
 function populateMemberDropdown() {
     const select = document.getElementById('member-id');
     select.innerHTML = '<option value="">No member linked</option>' + 
-        allMembers.map(m => `<option value="${m.id}">${m.name}${m.nickname ? ' [' + m.nickname + ']' : ''} (${m.rank})</option>`).join('');
+        allMembers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}${m.nickname ? ' [' + escapeHtml(m.nickname) + ']' : ''} (${escapeHtml(m.rank)})</option>`).join('');
 }
 
 // Show Create User Modal
@@ -528,12 +536,12 @@ function displayLoginHistory(logins) {
                     return `
                         <tr class="login-row ${statusClass}">
                             <td><span class="status-badge ${statusClass}">${status}</span></td>
-                            <td><strong>${login.username}</strong></td>
+                            <td><strong>${escapeHtml(login.username)}</strong></td>
                             <td>${time}</td>
-                            <td>📍 ${location}</td>
-                            <td><code>${ip}</code></td>
-                            <td>${isp}</td>
-                            <td class="device-info">${device}</td>
+                            <td>📍 ${escapeHtml(location)}</td>
+                            <td><code>${escapeHtml(ip)}</code></td>
+                            <td>${escapeHtml(isp)}</td>
+                            <td class="device-info">${escapeHtml(device)}</td>
                         </tr>
                     `;
                 }).join('')}

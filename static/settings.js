@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+// Settings page
 const SETTINGS_URL = `${API_BASE}/settings`;
 
 let isR5OrAdmin = false;
@@ -13,6 +13,7 @@ async function checkAuth() {
             return false;
         }
         const data = await response.json();
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         isR5OrAdmin = data.is_r5_or_admin || false;
         

@@ -19,6 +19,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"log/slog"
 	"math"
 	"math/big"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -327,6 +329,49 @@ type VSPointsWithMember struct {
 
 var db *sql.DB
 var store *sessions.CookieStore
+var logger *slog.Logger
+
+func init() {
+	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+}
+
+// jsonError writes a JSON error response with the given status code and message.
+func jsonError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// requestLoggingMiddleware logs each HTTP request with method, path, status, and duration.
+func requestLoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		duration := time.Since(start)
+		slog.Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rw.statusCode,
+			"duration_ms", duration.Milliseconds(),
+			"remote", r.RemoteAddr,
+		)
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
 
 // Calculate Levenshtein distance between two strings
 func levenshteinDistance(s1, s2 string) int {
@@ -416,17 +461,62 @@ func max(a, b int) int {
 	return b
 }
 
+// loginRateLimiter tracks failed login attempts per IP to prevent brute force attacks.
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time // IP -> timestamps of recent failures
+}
+
+var rateLimiter = &loginRateLimiter{
+	attempts: make(map[string][]time.Time),
+}
+
+const (
+	rateLimitWindow  = 15 * time.Minute
+	rateLimitMaxFail = 10 // max failed attempts per IP within the window
+)
+
+// isRateLimited returns true if the IP has exceeded the allowed number of failed login attempts.
+func (rl *loginRateLimiter) isRateLimited(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	var recent []time.Time
+	for _, t := range rl.attempts[ip] {
+		if now.Sub(t) < rateLimitWindow {
+			recent = append(recent, t)
+		}
+	}
+	rl.attempts[ip] = recent
+	return len(recent) >= rateLimitMaxFail
+}
+
+// recordFailure records a failed login attempt for the given IP.
+func (rl *loginRateLimiter) recordFailure(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
+}
+
 // initSessionStore initializes the session store with secure settings
 func initSessionStore() {
 	// Get session key from environment or generate a secure one
 	sessionKey := os.Getenv("SESSION_KEY")
+	isProduction := os.Getenv("PRODUCTION") == "true" || os.Getenv("HTTPS") == "true"
+
 	if sessionKey == "" {
+		if isProduction {
+			log.Fatal("FATAL: SESSION_KEY environment variable is required in production. Generate one with: openssl rand -hex 32")
+		}
 		// Generate a random 32-byte key for development
 		key := make([]byte, 32)
 		rand.Read(key)
 		sessionKey = hex.EncodeToString(key)
 		log.Println("WARNING: No SESSION_KEY environment variable set. Using generated key (not persistent across restarts).")
 		log.Printf("For production, set SESSION_KEY environment variable. Example: export SESSION_KEY=%s", sessionKey)
+	} else if isProduction && len(sessionKey) < 32 {
+		log.Fatal("FATAL: SESSION_KEY must be at least 32 characters for production. Generate one with: openssl rand -hex 32")
 	}
 
 	// Decode hex key
@@ -445,9 +535,6 @@ func initSessionStore() {
 	store = sessions.NewCookieStore(key[:32])
 
 	// Configure secure cookie options
-	// Check if we're running in production (HTTPS)
-	isProduction := os.Getenv("PRODUCTION") == "true" || os.Getenv("HTTPS") == "true"
-
 	store.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   86400,                   // 24 hours
@@ -1519,11 +1606,11 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 		if err != nil {
 			return err
 		}
-		_, err = db.Exec("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", "admin", string(hashedPassword), true)
+		_, err = db.Exec("INSERT INTO users (username, password, is_admin, must_change_password) VALUES (?, ?, ?, ?)", "admin", string(hashedPassword), true, true)
 		if err != nil {
 			return err
 		}
-		log.Println("Default admin user created - Username: admin, Password: admin123")
+		log.Println("Default admin user created - Username: admin, Password: admin123 (password change required)")
 	}
 
 	// Migrate members table to add soft-delete columns
@@ -1566,6 +1653,35 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 			return err
 		}
 		log.Println("Database migration: Added active column to users table")
+	}
+
+	// Migrate users table to add must_change_password column
+	var mustChangePwdExists bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('users') WHERE name = 'must_change_password'`).Scan(&mustChangePwdExists)
+	if err != nil {
+		return err
+	}
+	if !mustChangePwdExists {
+		_, err = db.Exec(`ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+		// Flag existing admin accounts that still have the default password
+		rows, qErr := db.Query(`SELECT id, password FROM users WHERE username = 'admin' AND is_admin = 1`)
+		if qErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var uid int
+				var hash string
+				if rows.Scan(&uid, &hash) == nil {
+					if bcrypt.CompareHashAndPassword([]byte(hash), []byte("admin123")) == nil {
+						db.Exec(`UPDATE users SET must_change_password = 1 WHERE id = ?`, uid)
+						log.Println("Flagged default admin account for mandatory password change")
+					}
+				}
+			}
+		}
+		log.Println("Database migration: Added must_change_password column to users table")
 	}
 
 	// Migrate train_schedules to add name snapshot columns (preserved even after member is deleted)
@@ -1711,6 +1827,19 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Block all API access except password change and auth check when password change is required
+		if mustChange, ok := session.Values["must_change_password"].(bool); ok && mustChange {
+			path := r.URL.Path
+			if path != "/api/change-password" && path != "/api/check-auth" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":                "Password change required",
+					"must_change_password": true,
+				})
+				return
+			}
+		}
 		next(w, r)
 	}
 }
@@ -1781,6 +1910,13 @@ func adminMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // Login handler
 func login(w http.ResponseWriter, r *http.Request) {
+	// Rate limiting check
+	clientIP := getClientIP(r)
+	if rateLimiter.isRateLimited(clientIP) {
+		http.Error(w, "Too many failed login attempts. Please try again later.", http.StatusTooManyRequests)
+		return
+	}
+
 	var creds Credentials
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1790,9 +1926,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 	var user User
 	var memberID sql.NullInt64
 	var isAdmin sql.NullBool
-	err := db.QueryRow("SELECT id, username, password, member_id, is_admin FROM users WHERE username = ?", creds.Username).Scan(&user.ID, &user.Username, &user.Password, &memberID, &isAdmin)
+	var mustChangePwd bool
+	err := db.QueryRow("SELECT id, username, password, member_id, is_admin, COALESCE(must_change_password, 0) FROM users WHERE username = ?", creds.Username).Scan(&user.ID, &user.Username, &user.Password, &memberID, &isAdmin, &mustChangePwd)
 	if err != nil {
 		// Track failed login attempt
+		rateLimiter.recordFailure(clientIP)
 		trackLogin(0, creds.Username, r, false)
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
@@ -1808,6 +1946,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password))
 	if err != nil {
 		// Track failed login attempt
+		rateLimiter.recordFailure(clientIP)
 		trackLogin(user.ID, user.Username, r, false)
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
@@ -1833,10 +1972,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 		session.Values["member_id"] = *user.MemberID
 	}
 	session.Values["is_admin"] = user.IsAdmin
+	session.Values["must_change_password"] = mustChangePwd
 	session.Save(r, w)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Login successful", "username": user.Username})
+	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Login successful", "username": user.Username, "must_change_password": mustChangePwd})
 }
 
 // Logout handler
@@ -1896,12 +2036,16 @@ func changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update password
-	_, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", string(newHash), userID)
+	// Update password and clear must_change_password flag
+	_, err = db.Exec("UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?", string(newHash), userID)
 	if err != nil {
 		http.Error(w, "Failed to update password", http.StatusInternalServerError)
 		return
 	}
+
+	// Clear the flag in the session
+	session.Values["must_change_password"] = false
+	session.Save(r, w)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Password changed successfully"})
@@ -2094,14 +2238,20 @@ func checkAuth(w http.ResponseWriter, r *http.Request) {
 			isR5OrAdmin = true
 		}
 
+		mustChangePwd := false
+		if v, ok := session.Values["must_change_password"].(bool); ok {
+			mustChangePwd = v
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"authenticated":    true,
-			"username":         username,
-			"rank":             rank,
-			"is_admin":         isAdmin,
-			"can_manage_ranks": canManageRanks,
-			"is_r5_or_admin":   isR5OrAdmin,
+			"authenticated":        true,
+			"username":             username,
+			"rank":                 rank,
+			"is_admin":             isAdmin,
+			"can_manage_ranks":     canManageRanks,
+			"is_r5_or_admin":       isR5OrAdmin,
+			"must_change_password": mustChangePwd,
 		})
 	} else {
 		w.Header().Set("Content-Type", "application/json")
@@ -2396,19 +2546,28 @@ func getLoginHistory(w http.ResponseWriter, r *http.Request) {
 		limit = "100"
 	}
 
+	// Validate limit is a positive integer to prevent injection
+	limitNum, err := strconv.Atoi(limit)
+	if err != nil || limitNum <= 0 || limitNum > 10000 {
+		limitNum = 100
+	}
+
 	query := `
 		SELECT ls.id, ls.user_id, ls.username, ls.ip_address, ls.user_agent, 
 		       ls.country, ls.city, ls.isp, ls.login_time, ls.success
 		FROM login_sessions ls
 	`
 
+	var args []interface{}
 	if userIDParam != "" {
-		query += " WHERE ls.user_id = " + userIDParam
+		query += " WHERE ls.user_id = ?"
+		args = append(args, userIDParam)
 	}
 
-	query += " ORDER BY ls.login_time DESC LIMIT " + limit
+	query += " ORDER BY ls.login_time DESC LIMIT ?"
+	args = append(args, limitNum)
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		http.Error(w, "Failed to fetch login history", http.StatusInternalServerError)
 		return
@@ -4900,6 +5059,18 @@ func createApplicant(w http.ResponseWriter, r *http.Request) {
 	id, _ := result.LastInsertId()
 	a.ID = int(id)
 
+	// Auto-create an R1 member record if created with on_trial or approved status
+	if a.Status == "on_trial" || a.Status == "approved" {
+		result2, err2 := db.Exec("INSERT INTO members (name, rank, eligible) VALUES (?, 'R1', 0)", a.Name)
+		if err2 == nil {
+			mid64, _ := result2.LastInsertId()
+			mid := int(mid64)
+			db.Exec("UPDATE applicants SET member_id = ? WHERE id = ?", mid, a.ID)
+			a.MemberID = &mid
+			log.Printf("Auto-created member id=%d (%s) for new applicant id=%d", mid, a.Name, a.ID)
+		}
+	}
+
 	// Fetch applied_at
 	db.QueryRow("SELECT applied_at FROM applicants WHERE id = ?", a.ID).Scan(&a.AppliedAt)
 
@@ -4999,8 +5170,32 @@ func updateApplicantStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-create an R1 member record when applicant is put on trial or approved
+	memberCreated := false
+	var createdMemberID int
+	if req.Status == "on_trial" || req.Status == "approved" {
+		var existingMemberID *int
+		var applicantName string
+		_ = db.QueryRow("SELECT member_id, name FROM applicants WHERE id = ?", id).Scan(&existingMemberID, &applicantName)
+		if existingMemberID == nil {
+			result2, err2 := db.Exec("INSERT INTO members (name, rank, eligible) VALUES (?, 'R1', 0)", applicantName)
+			if err2 == nil {
+				mid64, _ := result2.LastInsertId()
+				createdMemberID = int(mid64)
+				db.Exec("UPDATE applicants SET member_id = ? WHERE id = ?", createdMemberID, id)
+				memberCreated = true
+				log.Printf("Auto-created member id=%d (%s) for applicant id=%d", createdMemberID, applicantName, id)
+			}
+		}
+	}
+
+	resp := map[string]interface{}{"status": req.Status}
+	if memberCreated {
+		resp["member_created"] = true
+		resp["member_id"] = createdMemberID
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": req.Status})
+	json.NewEncoder(w).Encode(resp)
 }
 
 // DELETE /api/applicants/{id} — delete applicant (R5/admin)
@@ -6967,8 +7162,8 @@ func detectAvatarEndX(gray *image.Gray, rowTop, rowBottom, maxAvatarX int) int {
 	}
 
 	windowW := max((rowBottom-rowTop)/4, 4) // window width proportional to row height
-	highThresh := 18.0                       // edge density considered "graphic"
-	lowThresh := 8.0                         // edge density considered "text/plain"
+	highThresh := 18.0                      // edge density considered "graphic"
+	lowThresh := 8.0                        // edge density considered "text/plain"
 
 	seenHigh := false
 	for x := b.Min.X; x+windowW <= maxAvatarX; x += windowW / 2 {
@@ -8659,9 +8854,26 @@ func main() {
 	router.HandleFunc("/api/power-history", authMiddleware(addPowerRecord)).Methods("POST")
 	router.HandleFunc("/api/power-history/process-screenshot", authMiddleware(processPowerScreenshot)).Methods("POST")
 
+	// Health check endpoints (no auth)
+	router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}).Methods("GET")
+	router.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := db.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"not ready","error":"database unavailable"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ready"}`))
+	}).Methods("GET")
+
 	// Serve static files
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./static")))
 
 	log.Println("Server starting on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Fatal(http.ListenAndServe(":8080", requestLoggingMiddleware(router)))
 }

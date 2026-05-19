@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+// Upload page
 
 let selectedFiles = []; // Array to hold multiple files
 const MAX_FILES = 25;
@@ -13,6 +13,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         return data;
@@ -189,10 +190,12 @@ function updatePreview() {
         reader.onload = (e) => {
             const previewItem = document.createElement('div');
             previewItem.className = 'preview-item';
+            previewItem.dataset.fileIndex = index;
             previewItem.innerHTML = `
                 <button class="remove-file" data-index="${index}" title="Remove">×</button>
                 <img src="${e.target.result}" class="preview-img" alt="${file.name}">
                 <div class="file-name" title="${file.name}">${file.name}</div>
+                <div class="preview-status"></div>
             `;
             
             // Add remove handler
@@ -209,6 +212,33 @@ function updatePreview() {
     dropContent.style.display = 'none';
     previewContainer.style.display = 'block';
     processImageBtn.style.display = 'block';
+}
+
+// Update a tile's status overlay during OCR processing
+function setTileStatus(index, status) {
+    const tile = previewGallery.querySelector(`[data-file-index="${index}"]`);
+    if (!tile) return;
+    const statusEl = tile.querySelector('.preview-status');
+    if (!statusEl) return;
+    tile.classList.remove('tile-pending', 'tile-processing', 'tile-done', 'tile-error');
+    switch (status) {
+        case 'pending':
+            tile.classList.add('tile-pending');
+            statusEl.textContent = '⏳';
+            break;
+        case 'processing':
+            tile.classList.add('tile-processing');
+            statusEl.innerHTML = '<span class="tile-spinner"></span>';
+            break;
+        case 'done':
+            tile.classList.add('tile-done');
+            statusEl.textContent = '✅';
+            break;
+        case 'error':
+            tile.classList.add('tile-error');
+            statusEl.textContent = '❌';
+            break;
+    }
 }
 
 function removeFile(index) {
@@ -244,10 +274,14 @@ processImageBtn.addEventListener('click', async () => {
     const originalText = processImageBtn.innerHTML;
     processImageBtn.innerHTML = '<span class="loading"></span> Processing...';
     processImageBtn.disabled = true;
+    processImageBtn.setAttribute('aria-busy', 'true');
     
     try {
         const typeLabel = screenshotType === 'power' ? 'Power Rankings' : 'VS Points';
         showResult(`🔍 Processing ${selectedFiles.length} ${typeLabel} screenshot${selectedFiles.length > 1 ? 's' : ''} with OCR...`, 'info');
+        
+        // Mark all tiles as pending
+        for (let j = 0; j < selectedFiles.length; j++) setTileStatus(j, 'pending');
         
         let totalSuccess = 0;
         let totalFailed = 0;
@@ -263,6 +297,7 @@ processImageBtn.addEventListener('click', async () => {
         // Process files sequentially to avoid overwhelming the server
         for (let i = 0; i < selectedFiles.length; i++) {
             const file = selectedFiles[i];
+            setTileStatus(i, 'processing');
             
             showResult(`🔍 Processing ${typeLabel} screenshot ${i + 1} of ${selectedFiles.length}: ${file.name}...`, 'info');
             
@@ -288,6 +323,7 @@ processImageBtn.addEventListener('click', async () => {
                 
                 const result = await response.json();
                 totalSuccess += result.success_count || 0;
+                setTileStatus(i, 'done');
                 
                 // Track detected day for VS points
                 if (screenshotType === 'vs-points' && result.day) {
@@ -305,6 +341,7 @@ processImageBtn.addEventListener('click', async () => {
                 console.error(`Error processing ${file.name}:`, error);
                 allErrors.push(`<strong>${file.name}:</strong> ${error.message}`);
                 totalFailed++;
+                setTileStatus(i, 'error');
             }
         }
         
@@ -365,6 +402,7 @@ processImageBtn.addEventListener('click', async () => {
     } finally {
         processImageBtn.innerHTML = originalText;
         processImageBtn.disabled = false;
+        processImageBtn.removeAttribute('aria-busy');
     }
 });
 

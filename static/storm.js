@@ -33,6 +33,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         currentUsername = data.username;
         let displayText = `👤 ${currentUsername}`;
@@ -256,6 +257,8 @@ function initSearchableSelect(container) {
         const member = allMembers.find(m => m.id === currentMemberId);
         if (member) {
             searchInput.value = `${member.name}${member.nickname ? ' [' + member.nickname + ']' : ''} (${member.rank})`;
+        }
+    }
     // Show dropdown on focus
     searchInput.addEventListener('focus', () => {
         updateDropdownList(container, '');
@@ -526,26 +529,25 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Event listeners
-document.getElementById('generate-mail-btn').addEventListener('click', generateMail);
-document.getElementById('clear-assignments-btn').addEventListener('click', clearAssignments);
-document.getElementById('copy-mail-btn').addEventListener('click', copyMail);
+// Event listeners & Initialize
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('generate-mail-btn').addEventListener('click', generateMail);
+    document.getElementById('clear-assignments-btn').addEventListener('click', clearAssignments);
+    document.getElementById('copy-mail-btn').addEventListener('click', copyMail);
 
-// Task force switcher
-document.querySelectorAll('input[name="taskForce"]').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        currentTaskForce = e.target.value;
-        loadAssignments();
-        document.getElementById('mail-output').style.display = 'none';
+    // Task force switcher
+    document.querySelectorAll('input[name="taskForce"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            currentTaskForce = e.target.value;
+            loadAssignments();
+            document.getElementById('mail-output').style.display = 'none';
+        });
     });
-});
 
-// Initialize
-(async () => {
     const authenticated = await checkAuth();
     if (authenticated) {
         await setupEventListeners();
         await loadMembers();
         await loadAssignments();
     }
-})();
+});

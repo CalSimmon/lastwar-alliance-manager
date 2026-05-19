@@ -8,6 +8,13 @@ let currentUserId = 0;
 let currentView = 'list'; // 'list' or 'grouped'
 let currentFilter = 'all'; // 'all', 'active', 'positive', 'negative', 'mine'
 
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 // Chart instances
 let pointsChart = null;
 let membersChart = null;
@@ -23,6 +30,7 @@ async function checkAuth() {
             window.location.href = '/login.html';
             return false;
         }
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         
         currentUsername = data.username;
         currentUserId = data.user_id || 0;
@@ -181,6 +189,21 @@ function updateStatistics() {
     document.getElementById('positive-reports').textContent = positive.length;
     document.getElementById('negative-reports').textContent = negative.length;
     document.getElementById('expired-reports').textContent = expired.length;
+
+    // Show empty-state hint when no data
+    const statsSection = document.querySelector('.stats-dashboard');
+    let emptyHint = statsSection.querySelector('.stats-empty-hint');
+    if (active.length === 0 && expired.length === 0) {
+        if (!emptyHint) {
+            emptyHint = document.createElement('p');
+            emptyHint.className = 'stats-empty-hint';
+            emptyHint.style.cssText = 'text-align:center; color:var(--text-muted); margin-top:12px; font-size:0.9em;';
+            emptyHint.textContent = '📝 No conduct reports filed yet. Use the form above to log a positive or negative report.';
+            statsSection.appendChild(emptyHint);
+        }
+    } else if (emptyHint) {
+        emptyHint.remove();
+    }
 }
 
 // Update all charts
@@ -553,18 +576,18 @@ function createConductCard(rec, compact = false) {
         <div class="rec-header">
             ${!compact ? `
             <div class="member-info">
-                <span class="member-name">${rec.member_name}</span>
-                <span class="rank-badge rank-badge-${rec.member_rank.toLowerCase()}">${rec.member_rank}</span>
+                <span class="member-name">${escapeHtml(rec.member_name)}</span>
+                <span class="rank-badge rank-badge-${rec.member_rank.toLowerCase()}">${escapeHtml(rec.member_rank)}</span>
             </div>
             ` : ''}
             <div class="rec-points ${pointsClass}">
                 ${pointsIcon} ${rec.points > 0 ? '+' : ''}${rec.points}
             </div>
         </div>
-        <div class="rec-notes">${rec.notes || 'No notes provided'}</div>
+        <div class="rec-notes">${escapeHtml(rec.notes) || 'No notes provided'}</div>
         <div class="rec-footer">
             <div class="rec-meta">
-                <span class="rec-by">by ${rec.created_by}</span>
+                <span class="rec-by">by ${escapeHtml(rec.created_by)}</span>
                 <span class="rec-date">${formatDate(rec.created_at)}</span>
                 <span class="expiry-badge ${rec.expired ? 'expired' : ''}">${expiryText}</span>
             </div>

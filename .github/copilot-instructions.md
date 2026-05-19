@@ -1,25 +1,25 @@
 - [x] Verify that the copilot-instructions.md file in the .github directory is created.
 
 - [x] Clarify Project Requirements
-	Node.js web application for Last War: Survival alliance management with member and rank tracking.
+	Go web application for Last War: Survival alliance management with member and rank tracking.
 
 - [x] Scaffold the Project
-	Created Node.js backend with Express, SQLite database, and HTML/CSS/JS frontend.
+	Go backend with gorilla/mux, SQLite database (modernc.org/sqlite), and vanilla HTML/CSS/JS frontend.
 
 - [x] Customize the Project
-	Implemented member and rank management features with full CRUD operations.
+	Implemented member management, train scheduling, awards, rankings, recommendations, conduct reports, recruitment, and OCR screenshot import.
 
 - [x] Install Required Extensions
 	No extensions required.
 
 - [x] Compile the Project
-	Node.js must be installed. Run `npm install` to install dependencies.
+	Go 1.21+ must be installed. Run `go build -o lastwar.exe .` to compile.
 
 - [x] Create and Run Task
-	Run `npm start` to start the server on http://localhost:3000
+	Run `go run main.go` or `./lastwar.exe` to start the server on http://localhost:8080
 
 - [x] Launch the Project
-	Access the application at http://localhost:3000 after starting the server.
+	Access the application at http://localhost:8080 after starting the server. For Docker: `docker compose up -d`.
 
 - [x] Ensure Documentation is Complete
-	README.md contains all project information and setup instructions.
+	README.md, DEPLOYMENT.md, QUICKSTART.md, and IMAGE_RECOGNITION.md contain all project information and setup instructions.

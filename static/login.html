@@ -77,7 +77,11 @@
                     successDiv.style.display = 'block';
                     
                     setTimeout(() => {
-                        window.location.href = '/';
+                        if (data.must_change_password) {
+                            window.location.href = '/profile.html?must_change_password=1';
+                        } else {
+                            window.location.href = '/';
+                        }
                     }, 1000);
                 } else {
                     const error = await response.text();
@@ -101,7 +105,11 @@
                 const response = await fetch('/api/check-auth');
                 const data = await response.json();
                 if (data.authenticated) {
-                    window.location.href = '/';
+                    if (data.must_change_password) {
+                        window.location.href = '/profile.html?must_change_password=1';
+                    } else {
+                        window.location.href = '/';
+                    }
                 }
             } catch (error) {
                 console.error('Auth check error:', error);

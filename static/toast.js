@@ -39,10 +39,11 @@ function showToast(message, type = 'info', title = '', duration = 4000) {
         <div class="toast-icon">${icons[type]}</div>
         <div class="toast-content">
             <div class="toast-title">${titles[type]}</div>
-            <div class="toast-message">${message}</div>
+            <div class="toast-message"></div>
         </div>
         <button class="toast-close" aria-label="Close">×</button>
     `;
+    toast.querySelector('.toast-message').textContent = message;
     
     container.appendChild(toast);
     

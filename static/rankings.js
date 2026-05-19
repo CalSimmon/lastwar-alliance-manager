@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+// Rankings page
 const RANKINGS_URL = `${API_BASE}/rankings`;
 
 function getCSSColor(varName) {
@@ -38,6 +38,7 @@ async function checkAuth() {
         const response = await fetch(`${API_BASE}/check-auth`);
         if (!response.ok) { window.location.href = '/login.html'; return false; }
         const data = await response.json();
+        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
         document.getElementById('username-display').textContent = `👤 ${data.username}`;
         return data;
     } catch {

@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="branding.js"></script>
     <script src="toast.js"></script>
+    <script src="common.js"></script>
     <script src="navigation.js"></script>
 </head>
 <body data-h1="📸 Last War: Survival" data-subtitle="Upload battlefield intelligence. OCR does the rest. Allegedly.">
@@ -14,18 +15,17 @@
 
         <main class="upload-container">
             <div class="upload-section">
-                <h3 style="margin-top: 0;">📸 Upload Battle Intel</h3>
+                <h3>📸 Upload Battle Intel</h3>
                 <p class="help-text">Drop your battlefield screenshots here. The system will attempt to extract the data automatically. Results may vary based on screenshot quality and the AI's mood.</p>
                 
-                <div class="screenshot-types" style="margin: 20px 0; padding: 15px; background: var(--card-bg); border-radius: 8px;">
-                    <p style="margin: 0 0 10px 0; font-weight: bold; color: var(--accent-secondary);">📋 Supported Screenshot Types:</p>
-                    <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                <details class="screenshot-types">
+                    <summary>📋 Supported Screenshot Types</summary>
+                    <ul>
                         <li><strong>⚡ Power Rankings</strong> - Track member power progression over time</li>
                         <li><strong>⚔️ VS Points (Daily Rank)</strong> - Record daily VS points with automatic day detection</li>
-                        <li><strong>🏆 Event Scores</strong> - Record weekly competition results</li>
-                        <li><strong>📊 Statistics</strong> - Capture member performance data</li>
+                        <li><strong>👥 Alliance Member List</strong> - Import members and ranks from roster screenshots</li>
                     </ul>
-                </div>
+                </details>
 
                 <!-- Tab Buttons -->
                 <div class="tab-buttons">
@@ -36,47 +36,47 @@
                 <!-- Image Upload Tab -->
                 <div id="tab-image" class="tab-content active">
                     <!-- Screenshot Type Selector -->
-                    <div style="margin-bottom: 20px;">
-                        <label for="screenshot-type" style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--text-primary);">Screenshot Type:</label>
-                        <select id="screenshot-type" class="form-input" style="width: 100%; max-width: 400px;">
+                    <div class="upload-field-group">
+                        <label for="screenshot-type">Screenshot Type:</label>
+                        <select id="screenshot-type" class="form-input">
                             <option value="power">⚡ Power Rankings</option>
                             <option value="vs-points">⚔️ VS Points (Daily Rank)</option>
                             <option value="member-list">👥 Alliance Member List (names + ranks)</option>
                         </select>
-                        <p id="screenshot-type-hint" class="help-text" style="margin-top: 8px;">
+                        <p id="screenshot-type-hint" class="help-text">
                             Upload power ranking screenshots from the alliance member list.
                         </p>
                     </div>
 
                     <!-- Week Selector (for VS Points) -->
-                    <div id="week-selector" style="margin-bottom: 20px; display: none;">
-                        <label for="vs-week" style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--text-primary);">Week:</label>
-                        <select id="vs-week" class="form-input" style="width: 100%; max-width: 400px;">
+                    <div id="week-selector" class="upload-field-group" style="display: none;">
+                        <label for="vs-week">Week:</label>
+                        <select id="vs-week" class="form-input">
                             <option value="current">📅 Current Week</option>
                             <option value="last">📅 Last Week</option>
                         </select>
-                        <p class="help-text" style="margin-top: 8px;">
+                        <p class="help-text">
                             Select which week to upload VS Points for.
                         </p>
                     </div>
                     
                     <p class="help-text">Upload up to 25 screenshots at once. Our OCR system will automatically extract text data from each image.</p>
                     
-                    <input type="file" id="image-input" accept="image/*" multiple style="display: none;">
+                    <input type="file" id="image-input" accept="image/*" multiple>
                     
                     <div id="drop-zone" class="drop-zone">
                         <div id="drop-content">
                             <div class="drop-icon">📁</div>
-                            <p style="margin: 10px 0; font-weight: bold; font-size: 18px;">Tap to upload or drag & drop</p>
-                            <p style="margin: 0; color: var(--text-muted);">PNG, JPG, JPEG - Max 10MB each, up to 25 files</p>
+                            <p class="drop-text">Tap to upload or drag & drop</p>
+                            <p class="drop-subtext">PNG, JPG, JPEG - Max 10MB each, up to 25 files</p>
                         </div>
                         
                         <div id="preview-container" class="preview-container">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                <p id="files-count" style="margin: 0; font-weight: bold; color: var(--accent-secondary);"></p>
-                                <button id="clear-btn" class="btn btn-secondary" style="width: auto; padding: 8px 16px; margin: 0;">🗑️ Clear All</button>
+                            <div class="preview-header">
+                                <p id="files-count"></p>
+                                <button id="clear-btn" class="btn btn-secondary">🗑️ Clear All</button>
                             </div>
-                            <div id="preview-gallery" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto;"></div>
+                            <div id="preview-gallery"></div>
                         </div>
                     </div>
                     
@@ -88,7 +88,7 @@
                 <!-- Manual Entry Tab -->
                 <div id="tab-text" class="tab-content">
                     <p class="help-text">Enter data manually, one entry per line in format: Name, Value</p>
-                    <p class="help-text" style="font-style: italic; font-size: 13px;">Example for Power: Gary6126, 71407341</p>
+                    <p class="help-text help-text-sm">Example for Power: Gary6126, 71407341</p>
                     
                     <textarea id="text-input" class="text-input" placeholder="Gary6126, 71407341&#10;Anjel87, 55456932&#10;ileesu, 52325609&#10;DYNOSUR, 51234567"></textarea>
                     
@@ -99,17 +99,17 @@
                 <div id="result-container"></div>
 
                 <!-- Member list OCR preview (shown only for member-list type) -->
-                <div id="member-ocr-preview" style="display:none; margin-top: 20px;">
-                    <h4 style="color: var(--accent-secondary); margin-bottom: 12px;">📋 Detected Members — Review &amp; Confirm</h4>
+                <div id="member-ocr-preview" style="display:none;">
+                    <h4>📋 Detected Members — Review &amp; Confirm</h4>
                     <p class="help-text">Review the members extracted from the screenshot. Uncheck any rows you want to skip, then click Confirm.</p>
-                    <div id="member-ocr-list" style="max-height: 350px; overflow-y: auto; margin-bottom: 16px;"></div>
-                    <div id="member-ocr-remove" style="display:none; margin-bottom: 16px;">
-                        <h5 style="color: var(--danger-color, #e57373); margin-bottom: 8px;">⚠️ Members not seen in screenshot (may be absent)</h5>
-                        <p class="help-text" style="font-size:12px;">Check names below to remove them from the database. Leave unchecked to keep them.</p>
-                        <div id="member-ocr-remove-list" style="max-height: 200px; overflow-y: auto;"></div>
+                    <div id="member-ocr-list"></div>
+                    <div id="member-ocr-remove" style="display:none;">
+                        <h5>⚠️ Members not seen in screenshot (may be absent)</h5>
+                        <p class="help-text">Check names below to remove them from the database. Leave unchecked to keep them.</p>
+                        <div id="member-ocr-remove-list"></div>
                     </div>
-                    <div id="member-ocr-errors" style="display:none; margin-bottom: 12px;"></div>
-                    <button id="confirm-member-ocr-btn" class="btn btn-primary" style="margin-right: 8px;">✔ Confirm &amp; Import Selected</button>
+                    <div id="member-ocr-errors" style="display:none;"></div>
+                    <button id="confirm-member-ocr-btn" class="btn btn-primary">✔ Confirm &amp; Import Selected</button>
                     <button id="cancel-member-ocr-btn" class="btn btn-secondary">Cancel</button>
                 </div>
             </div>
