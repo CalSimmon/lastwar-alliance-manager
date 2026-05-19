@@ -9200,6 +9200,36 @@ func processMarshalGuardScreenshots(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Try row-based extraction first (much more accurate)
+		rowParticipants, rowDate, rowTotal := extractMGByRows(imageData)
+		if len(rowParticipants) >= 3 {
+			log.Printf("MG OCR: row-based extraction found %d participants", len(rowParticipants))
+			if rowDate != "" && eventDate == "" {
+				eventDate = rowDate
+			}
+			if rowTotal > totalDamage {
+				totalDamage = rowTotal
+			}
+			for _, p := range rowParticipants {
+				merged := false
+				for i, existing := range allParticipants {
+					if strings.EqualFold(existing.NameSnapshot, p.NameSnapshot) {
+						if p.Damage > existing.Damage {
+							allParticipants[i] = p
+						}
+						merged = true
+						break
+					}
+				}
+				if !merged {
+					allParticipants = append(allParticipants, p)
+				}
+			}
+			continue
+		}
+
+		// Fallback: full-image OCR
+		log.Printf("MG OCR: row-based extraction found only %d, falling back to full-image OCR", len(rowParticipants))
 		client := gosseract.NewClient()
 		client.SetImageFromBytes(imageData)
 		text, err := client.Text()
@@ -9216,11 +9246,12 @@ func processMarshalGuardScreenshots(w http.ResponseWriter, r *http.Request) {
 		if result.TotalDamage > totalDamage {
 			totalDamage = result.TotalDamage
 		}
-		// Merge participants by rank (higher damage wins)
+		// Merge participants by name (same player appears in multiple screenshots)
 		for _, p := range result.Participants {
 			merged := false
 			for i, existing := range allParticipants {
-				if existing.RankInEvent == p.RankInEvent {
+				if strings.EqualFold(existing.NameSnapshot, p.NameSnapshot) {
+					// Keep the version with higher damage
 					if p.Damage > existing.Damage {
 						allParticipants[i] = p
 					}
@@ -9237,6 +9268,24 @@ func processMarshalGuardScreenshots(w http.ResponseWriter, r *http.Request) {
 	// Allow manual event_date override from form field
 	if manualDate := r.FormValue("event_date"); manualDate != "" {
 		eventDate = manualDate
+	}
+
+	// Reassign ranks sequentially after merge: MVP=1, then 2,3,...
+	// First sort: MVP first, then by original rank order
+	sort.SliceStable(allParticipants, func(i, j int) bool {
+		if allParticipants[i].RankInEvent == 1 && allParticipants[j].RankInEvent != 1 {
+			return true
+		}
+		if allParticipants[j].RankInEvent == 1 && allParticipants[i].RankInEvent != 1 {
+			return false
+		}
+		return false // keep insertion order for non-MVP
+	})
+	for i := range allParticipants {
+		if i == 0 && allParticipants[i].RankInEvent == 1 {
+			continue // keep MVP at rank 1
+		}
+		allParticipants[i].RankInEvent = i + 1
 	}
 
 	// Match participants to members
@@ -9269,6 +9318,208 @@ func processMarshalGuardScreenshots(w http.ResponseWriter, r *http.Request) {
 		Participants:    allParticipants,
 		ExistingEventID: existingEventID,
 	})
+}
+
+// extractMGByRows segments a Marshal Guard screenshot into rows and OCRs each independently.
+// The Alliance Exercise ranking layout is:
+//
+//	| Rank | Avatar | Player Name [Tag] | Damage |
+//
+// Similar column ratios to VS Points but damage column is on the right.
+func extractMGByRows(imageData []byte) ([]MGOCRParticipant, string, int64) {
+	img, _, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		log.Printf("MG row OCR: failed to decode image: %v", err)
+		return nil, "", 0
+	}
+
+	bounds := img.Bounds()
+	imgW := bounds.Dx()
+	imgH := bounds.Dy()
+
+	// Analyze screenshot to get data region
+	attrs := analyzeScreenshot(img)
+	dataRegion := attrs.DataRegion
+
+	// Convert to grayscale for edge detection
+	grayFull := convertToGrayscale(img)
+
+	// Find row boundaries using separator line detection
+	const minRowH = 30
+	rowBounds := findRowBoundaries(grayFull, dataRegion.Top, dataRegion.Bottom, minRowH)
+	log.Printf("MG row OCR: found %d rows in data region (image %dx%d, data region %d-%d)",
+		len(rowBounds), imgW, imgH, dataRegion.Top, dataRegion.Bottom)
+
+	if len(rowBounds) == 0 {
+		return nil, "", 0
+	}
+
+	var participants []MGOCRParticipant
+	var eventDate string
+	var totalDamage int64
+	rank := 1
+
+	// First: try to extract date/total from the header area (above data region)
+	if dataRegion.Top > 50 {
+		headerImg := image.NewRGBA(image.Rect(0, 0, imgW, dataRegion.Top))
+		draw.Draw(headerImg, headerImg.Bounds(), img, image.Point{0, 0}, draw.Src)
+		var headerBuf bytes.Buffer
+		if png.Encode(&headerBuf, headerImg) == nil {
+			hClient := gosseract.NewClient()
+			hClient.SetImageFromBytes(headerBuf.Bytes())
+			headerText, herr := hClient.Text()
+			hClient.Close()
+			if herr == nil {
+				// Extract date
+				datePatterns := []*regexp.Regexp{
+					regexp.MustCompile(`(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})`),
+					regexp.MustCompile(`(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})`),
+				}
+				for _, line := range strings.Split(headerText, "\n") {
+					for pi, pat := range datePatterns {
+						if m := pat.FindStringSubmatch(line); m != nil {
+							var y, mo, d int
+							if pi == 0 {
+								y, _ = strconv.Atoi(m[1])
+								mo, _ = strconv.Atoi(m[2])
+								d, _ = strconv.Atoi(m[3])
+							} else {
+								d, _ = strconv.Atoi(m[1])
+								mo, _ = strconv.Atoi(m[2])
+								y, _ = strconv.Atoi(m[3])
+							}
+							if y >= 2024 && y <= 2030 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31 {
+								eventDate = fmt.Sprintf("%04d-%02d-%02d", y, mo, d)
+							}
+						}
+					}
+				}
+				// Extract total damage from header
+				totalAbbrRe := regexp.MustCompile(`(?i)(\d+[,.]?\d*)\s*([GMK])`)
+				for _, line := range strings.Split(headerText, "\n") {
+					lower := strings.ToLower(line)
+					if strings.Contains(lower, "total") || strings.Contains(lower, "alliance") || strings.Contains(lower, "score") || strings.Contains(lower, "damage") {
+						if m := totalAbbrRe.FindStringSubmatch(line); m != nil {
+							totalDamage = parseDamageValue(strings.ReplaceAll(m[1], ",", ""), m[2])
+						}
+					}
+				}
+				log.Printf("MG row OCR header: date=%q total=%d headerText=%q", eventDate, totalDamage, headerText)
+			}
+		}
+	}
+
+	// Process each data row
+	for i, rb := range rowBounds {
+		rowTop, rowBottom := rb[0], rb[1]
+		rowH := rowBottom - rowTop
+		if rowH < minRowH {
+			continue
+		}
+
+		// Layout: | rank/avatar (0-28%) | name (28%-65%) | damage (65%-100%) |
+		// Detect avatar boundary
+		nameStartX := detectAvatarEndX(grayFull, rowTop, rowBottom, imgW*35/100)
+		if nameStartX < imgW*15/100 {
+			nameStartX = imgW * 20 / 100 // safety minimum
+		}
+
+		nameEndX := imgW * 65 / 100
+		damageStartX := imgW * 65 / 100
+
+		nameTopH := rowH * 60 / 100 // top 60% has the name
+
+		// Extract name region
+		nameImg := image.NewRGBA(image.Rect(0, 0, nameEndX-nameStartX, nameTopH))
+		draw.Draw(nameImg, nameImg.Bounds(), img, image.Point{nameStartX, rowTop}, draw.Src)
+
+		// Extract damage region
+		damageImg := image.NewRGBA(image.Rect(0, 0, imgW-damageStartX, rowH))
+		draw.Draw(damageImg, damageImg.Bounds(), img, image.Point{damageStartX, rowTop}, draw.Src)
+
+		// Scale up for better OCR
+		scaledName := scaleImage(nameImg, 3)
+		grayName := convertToGrayscale(scaledName)
+
+		scaledDamage := scaleImage(damageImg, 3)
+		grayDamage := convertToGrayscale(scaledDamage)
+
+		// OCR name
+		var nameBuf bytes.Buffer
+		if err := png.Encode(&nameBuf, grayName); err != nil {
+			continue
+		}
+		nameClient := gosseract.NewClient()
+		nameClient.SetImageFromBytes(nameBuf.Bytes())
+		nameClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+		nameText, err := nameClient.Text()
+		nameClient.Close()
+		if err != nil || len(strings.TrimSpace(nameText)) == 0 {
+			continue
+		}
+
+		// OCR damage — allow digits, commas, dots, G/M/K
+		var dmgBuf bytes.Buffer
+		if err := png.Encode(&dmgBuf, grayDamage); err != nil {
+			continue
+		}
+		dmgClient := gosseract.NewClient()
+		dmgClient.SetImageFromBytes(dmgBuf.Bytes())
+		dmgClient.SetVariable("tessedit_char_whitelist", "0123456789,.GMKgmk")
+		dmgClient.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+		dmgText, err := dmgClient.Text()
+		dmgClient.Close()
+		if err != nil || len(strings.TrimSpace(dmgText)) == 0 {
+			log.Printf("MG row %d: name=%q but no damage text", i+1, strings.TrimSpace(nameText))
+			continue
+		}
+
+		// Parse damage value
+		dmgStr := strings.TrimSpace(dmgText)
+		var damage int64
+		abbrRe := regexp.MustCompile(`(\d+[.,]?\d*)\s*([GMKgmk])`)
+		if m := abbrRe.FindStringSubmatch(dmgStr); m != nil {
+			damage = parseDamageValue(strings.ReplaceAll(m[1], ",", "."), strings.ToUpper(m[2]))
+		} else {
+			// Plain number
+			numStr := regexp.MustCompile(`[^0-9]`).ReplaceAllString(dmgStr, "")
+			if v, err := strconv.ParseInt(numStr, 10, 64); err == nil && v >= 100000 {
+				damage = v
+			}
+		}
+
+		if damage <= 0 {
+			log.Printf("MG row %d: name=%q damage text=%q -> unparseable", i+1, strings.TrimSpace(nameText), dmgStr)
+			continue
+		}
+
+		// Clean name
+		name := cleanPlayerName(strings.TrimSpace(nameText))
+
+		// Extract alliance tag from name
+		var tag string
+		tagRe := regexp.MustCompile(`\[([^\]]+)\]`)
+		if m := tagRe.FindStringSubmatch(name); m != nil {
+			tag = m[1]
+			name = strings.TrimSpace(strings.Replace(name, m[0], "", 1))
+		}
+
+		if len(name) < 2 {
+			continue
+		}
+
+		log.Printf("MG row %d: rank=%d name=%q tag=%q damage=%d (raw: %q)", i+1, rank, name, tag, damage, dmgStr)
+
+		participants = append(participants, MGOCRParticipant{
+			RankInEvent:  rank,
+			NameSnapshot: name,
+			AllianceTag:  tag,
+			Damage:       damage,
+		})
+		rank++
+	}
+
+	return participants, eventDate, totalDamage
 }
 
 func loadAllMembers() ([]Member, error) {
@@ -9337,92 +9588,181 @@ func matchMGParticipant(p *MGOCRParticipant, members []Member) {
 	}
 }
 
-// parseMarshalGuardText extracts event data from OCR text of a Marshal Guard screenshot
+// parseMarshalGuardText extracts event data from OCR text of a Marshal Guard screenshot.
+// The Alliance Exercise mail format has:
+//   - [TAG]PlayerName on one line (relatively clean in OCR)
+//   - "Total Damage: X.XXG" on the next line (often garbled by OCR)
+//   - MVP section at the top (rank 1)
+//   - Date at the bottom: "2026-5-6 20:30:10"
+//
+// Strategy: Find [TAG]Name patterns first (they survive OCR well as they are
+// large bold text), then look for damage values in nearby lines using very
+// flexible matching that handles OCR noise like: colons instead of dots,
+// exclamation marks, brackets, missing characters, etc.
 func parseMarshalGuardText(text string) MarshalGuardOCRResult {
 	var result MarshalGuardOCRResult
 	lines := strings.Split(text, "\n")
 
-	// Extract event date
-	dateRe := regexp.MustCompile(`(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{2}:\d{2}:\d{2}`)
+	log.Printf("MG OCR raw text (%d lines):\n%s", len(lines), text)
+
+	// Extract event date — "2026-5-6 20:30:10" or similar
+	dateRe := regexp.MustCompile(`(\d{4})-(\d{1,2})-(\d{1,2})`)
 	for _, line := range lines {
 		if m := dateRe.FindStringSubmatch(line); m != nil {
 			year, _ := strconv.Atoi(m[1])
 			month, _ := strconv.Atoi(m[2])
 			day, _ := strconv.Atoi(m[3])
-			result.EventDate = fmt.Sprintf("%04d-%02d-%02d", year, month, day)
-			break
-		}
-	}
-
-	// Extract total alliance damage
-	totalRe := regexp.MustCompile(`(?i)(?:alliance|total|score)[^\d]*(\d+\.?\d*)\s*([GMK])`)
-	for _, line := range lines {
-		if m := totalRe.FindStringSubmatch(line); m != nil {
-			result.TotalDamage = parseDamageValue(m[1], m[2])
-			break
-		}
-	}
-
-	// Extract participant rows
-	// Pattern: rank or MVP + name + optional [TAG] + damage value
-	tagRe := regexp.MustCompile(`\[([^\]]+)\]`)
-	damageRe := regexp.MustCompile(`(\d+\.?\d*)\s*([GMK])\b`)
-	attackRe := regexp.MustCompile(`(\d+)\s*(?:attack|atk)`)
-	rankLineRe := regexp.MustCompile(`^(?:(?:MVP|No\.\s*(\d+)|\b(\d{1,2})\b))`)
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		// Try to extract rank
-		var rank int
-		if strings.Contains(strings.ToUpper(trimmed), "MVP") {
-			rank = 1
-		} else if m := rankLineRe.FindStringSubmatch(trimmed); m != nil {
-			if m[1] != "" {
-				rank, _ = strconv.Atoi(m[1])
-			} else if m[2] != "" {
-				rank, _ = strconv.Atoi(m[2])
+			if year >= 2024 && year <= 2030 && month >= 1 && month <= 12 && day >= 1 && day <= 31 {
+				result.EventDate = fmt.Sprintf("%04d-%02d-%02d", year, month, day)
+				break
 			}
 		}
-		if rank <= 0 {
+	}
+
+	// ── Find [TAG]Name anchors ─────────────────────────────────────────────
+	// Pattern for [TAG]Name — OCR often garbles the closing ] as l, I, or 1
+	// Using uppercase-only for tag so backtracking works when ] is garbled
+	tagNameRe := regexp.MustCompile(`\[([A-Z0-9]{2,6})[\]lI1)\s]([A-Za-z][A-Za-z0-9_ ]{1,25})`)
+
+	// Flexible damage patterns that handle OCR noise:
+	//   "27:35G" "27.35G" "27!35G" "27,35G" → 27.35G
+	//   "127:35G" → could be 127.35G or 27.35G (leading 1 might be OCR noise)
+	//   "5:24G" "/5:24G" → 5.24G
+	//   "643.05M" "643:05M" → 643.05M
+	// Pattern: digits, OCR-separator (.:!,;|), two digits, optional unit
+	dmgFlexRe := regexp.MustCompile(`(\d{1,4})[.:!,;|](\d{2})\s*([GMKgmk])?`)
+	// Clean pattern: standard X.XXG
+	dmgCleanRe := regexp.MustCompile(`(\d+\.?\d*)\s*([GMKgmk])`)
+
+	// MVP marker
+	mvpRe := regexp.MustCompile(`(?i)\bMV[PE]?\b`)
+	// Attack count
+	attackRe := regexp.MustCompile(`(?i)[Aa]ttacks?[:\s}]*(\d+)`)
+	// "Damage Ranking" header — marks end of MVP section
+	rankingHeaderRe := regexp.MustCompile(`(?i)[Dd]amage\s*[Rr]anking`)
+
+	type entry struct {
+		name    string
+		tag     string
+		damage  int64
+		attacks *int
+		isMVP   bool
+	}
+	var entries []entry
+
+	// Find the "Damage Ranking" header line to separate MVP from ranked players
+	rankingHeaderIdx := -1
+	for i, line := range lines {
+		if rankingHeaderRe.MatchString(line) {
+			rankingHeaderIdx = i
+			break
+		}
+	}
+
+	// Check if MVP marker exists in the text
+	hasMVP := false
+	for _, line := range lines {
+		if mvpRe.MatchString(line) {
+			hasMVP = true
+			break
+		}
+	}
+
+	// Find all [TAG]Name occurrences
+	usedDmgLines := map[int]bool{} // track which lines have been claimed for damage
+	for i, line := range lines {
+		m := tagNameRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		tag := m[1]
+		name := strings.TrimSpace(m[2])
+
+		// Skip UI labels
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, "alliance") || strings.Contains(lower, "exercise") ||
+			strings.Contains(lower, "reward") {
 			continue
 		}
 
-		// Extract damage
+		// Determine if this is the MVP (appears before the "Damage Ranking" header)
+		isMVP := false
+		if hasMVP && rankingHeaderIdx > 0 && i < rankingHeaderIdx {
+			isMVP = true
+		}
+
+		// Look for damage value: search this line and next 2 lines
 		var damage int64
-		if m := damageRe.FindStringSubmatch(trimmed); m != nil {
-			damage = parseDamageValue(m[1], m[2])
-		}
-		if damage <= 0 {
-			continue
-		}
-
-		// Extract alliance tag
-		var tag string
-		if m := tagRe.FindStringSubmatch(trimmed); m != nil {
-			tag = m[1]
+		var attacks *int
+		searchStart := i
+		searchEnd := i + 2
+		if searchEnd >= len(lines) {
+			searchEnd = len(lines) - 1
 		}
 
-		// Extract name: text between rank and damage, minus tag
-		name := extractMGName(trimmed, rank, tag)
+		for si := searchStart; si <= searchEnd; si++ {
+			sline := lines[si]
 
-		// Extract attack count
-		var attackCount *int
-		if m := attackRe.FindStringSubmatch(trimmed); m != nil {
-			ac, _ := strconv.Atoi(m[1])
-			attackCount = &ac
+			// Skip lines that look like dates (e.g. "2026-5-6 20:30:10")
+			if dateRe.MatchString(sline) {
+				continue
+			}
+
+			// Skip lines already claimed for damage by a previous name
+			if usedDmgLines[si] {
+				continue
+			}
+
+			// Try flexible damage pattern (handles OCR noise)
+			if dm := dmgFlexRe.FindStringSubmatch(sline); dm != nil {
+				intPart, _ := strconv.ParseFloat(dm[1], 64)
+				fracPart, _ := strconv.ParseFloat("0."+dm[2], 64)
+				val := intPart + fracPart
+				unit := "G" // default to G if unit missing
+				if dm[3] != "" {
+					unit = strings.ToUpper(dm[3])
+				}
+				d := parseDamageValue(fmt.Sprintf("%.2f", val), unit)
+				if d > damage {
+					damage = d
+					usedDmgLines[si] = true
+				}
+			} else if dm := dmgCleanRe.FindStringSubmatch(sline); dm != nil {
+				d := parseDamageValue(strings.ReplaceAll(dm[1], ",", ""), strings.ToUpper(dm[2]))
+				if d > damage {
+					damage = d
+					usedDmgLines[si] = true
+				}
+			}
+
+			// Look for attack count
+			if am := attackRe.FindStringSubmatch(sline); am != nil {
+				ac, _ := strconv.Atoi(am[1])
+				attacks = &ac
+			}
 		}
 
+		log.Printf("MG OCR found: name=%q tag=%q damage=%d isMVP=%v", name, tag, damage, isMVP)
+		entries = append(entries, entry{name: name, tag: tag, damage: damage, attacks: attacks, isMVP: isMVP})
+	}
+
+	// Assign ranks: MVP=1, rest sequential starting from 2
+	rank := 2
+	for _, e := range entries {
+		r := rank
+		if e.isMVP {
+			r = 1
+		} else {
+			rank++
+		}
 		result.Participants = append(result.Participants, MGOCRParticipant{
-			RankInEvent:  rank,
-			NameSnapshot: name,
-			AllianceTag:  tag,
-			Damage:       damage,
-			AttackCount:  attackCount,
+			RankInEvent:  r,
+			NameSnapshot: e.name,
+			AllianceTag:  e.tag,
+			Damage:       e.damage,
+			AttackCount:  e.attacks,
 		})
+		log.Printf("MG OCR parsed rank=%d name=%q tag=%q damage=%d", r, e.name, e.tag, e.damage)
 	}
 
 	return result
@@ -9439,23 +9779,6 @@ func parseDamageValue(numStr, unit string) int64 {
 		return int64(val * 1e3)
 	}
 	return int64(val)
-}
-
-func extractMGName(line string, rank int, tag string) string {
-	// Remove rank prefix (MVP, No.X, or bare number)
-	cleaned := regexp.MustCompile(`^(?:MVP|No\.\s*\d+|\d{1,2})\s*`).ReplaceAllString(strings.TrimSpace(line), "")
-	// Remove tag
-	if tag != "" {
-		cleaned = strings.Replace(cleaned, "["+tag+"]", "", 1)
-	}
-	// Remove damage values and attack counts
-	cleaned = regexp.MustCompile(`\d+\.?\d*\s*[GMK]\b`).ReplaceAllString(cleaned, "")
-	cleaned = regexp.MustCompile(`\d+\s*(?:attack|atk)s?`).ReplaceAllString(cleaned, "")
-	// Clean up whitespace
-	cleaned = strings.TrimSpace(cleaned)
-	// Remove trailing/leading punctuation
-	cleaned = strings.Trim(cleaned, ".,;:- ")
-	return cleaned
 }
 
 func main() {

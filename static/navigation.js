@@ -300,11 +300,8 @@
 
     // Hide feature-gated nav links based on settings
     function applyFeatureGates() {
-        fetch('/api/settings').then(r => r.ok ? r.json() : null).then(s => {
-            if (!s) return;
-            const mgLink = document.getElementById('mg-nav-link');
-            if (mgLink && s.marshal_guard_enabled === false) mgLink.style.display = 'none';
-        }).catch(() => {});
+        // Marshal Guard nav link is always visible; the setting only controls
+        // whether officers can create new events on the page itself.
     }
 
     // Auto-initialize
