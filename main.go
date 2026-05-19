@@ -240,6 +240,7 @@ type Settings struct {
 	MinPower                     int    `json:"min_power"`
 	MinHQLevel                   int    `json:"min_hq_level"`
 	VipSeatEnabled               bool   `json:"vip_seat_enabled"`
+	MarshalGuardEnabled          bool   `json:"marshal_guard_enabled"`
 }
 
 type MemberRanking struct {
@@ -256,6 +257,8 @@ type MemberRanking struct {
 	DaysSinceLastConductor  *int          `json:"days_since_last_conductor"`
 	AwardDetails            []AwardDetail `json:"award_details"`
 	RecommendationCount     int           `json:"recommendation_count"`
+	MGEventCount            int           `json:"mg_event_count"`
+	MGTotalDamage           int64         `json:"mg_total_damage"`
 }
 
 type AwardDetail struct {
@@ -1816,6 +1819,47 @@ Ask in alliance chat for the train to be assigned. Thanks for keeping the train 
 		log.Println("Database migration: Added vip_seat_enabled column to settings table")
 	}
 
+	// Migrate settings table to add marshal_guard_enabled column if missing
+	var mgEnabledColumnExists bool
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='marshal_guard_enabled'`).Scan(&mgEnabledColumnExists)
+	if err != nil || !mgEnabledColumnExists {
+		_, err = db.Exec(`ALTER TABLE settings ADD COLUMN marshal_guard_enabled INTEGER NOT NULL DEFAULT 1`)
+		if err != nil {
+			return err
+		}
+		log.Println("Database migration: Added marshal_guard_enabled column to settings table")
+	}
+
+	// Create marshal_guard_events table
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS marshal_guard_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_date TEXT NOT NULL,
+		total_alliance_damage INTEGER NOT NULL DEFAULT 0,
+		notes TEXT,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		created_by_id INTEGER REFERENCES users(id)
+	)`)
+	if err != nil {
+		return err
+	}
+
+	// Create marshal_guard_participants table
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS marshal_guard_participants (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_id INTEGER NOT NULL REFERENCES marshal_guard_events(id) ON DELETE CASCADE,
+		member_id INTEGER REFERENCES members(id),
+		name_snapshot TEXT NOT NULL,
+		alliance_tag TEXT,
+		rank_in_event INTEGER NOT NULL,
+		damage INTEGER NOT NULL DEFAULT 0,
+		attack_count INTEGER,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(event_id, rank_in_event)
+	)`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -2244,7 +2288,7 @@ func checkAuth(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		response := map[string]interface{}{
 			"authenticated":        true,
 			"username":             username,
 			"rank":                 rank,
@@ -2252,7 +2296,11 @@ func checkAuth(w http.ResponseWriter, r *http.Request) {
 			"can_manage_ranks":     canManageRanks,
 			"is_r5_or_admin":       isR5OrAdmin,
 			"must_change_password": mustChangePwd,
-		})
+		}
+		if memberID, ok := session.Values["member_id"].(int); ok {
+			response["member_id"] = memberID
+		}
+		json.NewEncoder(w).Encode(response)
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"authenticated": false})
@@ -4634,7 +4682,8 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		COALESCE(vs_points_weekly_target, 0) as vs_points_weekly_target,
 		COALESCE(min_power, 0) as min_power,
 		COALESCE(min_hq_level, 0) as min_hq_level,
-		COALESCE(vip_seat_enabled, 1) as vip_seat_enabled
+		COALESCE(vip_seat_enabled, 1) as vip_seat_enabled,
+		COALESCE(marshal_guard_enabled, 1) as marshal_guard_enabled
 		FROM settings WHERE id = 1`).Scan(
 		&settings.ID,
 		&settings.AllianceName,
@@ -4659,6 +4708,7 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 		&settings.MinPower,
 		&settings.MinHQLevel,
 		&settings.VipSeatEnabled,
+		&settings.MarshalGuardEnabled,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -4709,7 +4759,8 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		vs_points_weekly_target = ?,
 		min_power = ?,
 		min_hq_level = ?,
-		vip_seat_enabled = ?
+		vip_seat_enabled = ?,
+		marshal_guard_enabled = ?
 		WHERE id = 1`,
 		settings.AllianceName,
 		settings.AllianceShortName,
@@ -4733,6 +4784,7 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 		settings.MinPower,
 		settings.MinHQLevel,
 		settings.VipSeatEnabled,
+		settings.MarshalGuardEnabled,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -5438,6 +5490,29 @@ func getMemberRankings(w http.ResponseWriter, r *http.Request) {
 		ranking.TotalScore = calculateMemberScore(member, ctx)
 
 		rankings = append(rankings, ranking)
+	}
+
+	// Load Marshal Guard stats per member
+	mgRows, err := db.Query(`
+		SELECT member_id, COUNT(DISTINCT event_id) as cnt, COALESCE(SUM(damage), 0) as total
+		FROM marshal_guard_participants WHERE member_id IS NOT NULL GROUP BY member_id`)
+	if err == nil {
+		defer mgRows.Close()
+		mgMap := map[int][2]int64{} // member_id -> [count, total_damage]
+		for mgRows.Next() {
+			var mid int
+			var cnt int64
+			var total int64
+			if mgRows.Scan(&mid, &cnt, &total) == nil {
+				mgMap[mid] = [2]int64{cnt, total}
+			}
+		}
+		for i := range rankings {
+			if stats, ok := mgMap[rankings[i].Member.ID]; ok {
+				rankings[i].MGEventCount = int(stats[0])
+				rankings[i].MGTotalDamage = stats[1]
+			}
+		}
 	}
 
 	// Sort by total score (highest first)
@@ -8745,6 +8820,644 @@ func processPowerScreenshot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ============================================================
+// Marshal Guard handlers
+// ============================================================
+
+type MarshalGuardEvent struct {
+	ID                  int                       `json:"id"`
+	EventDate           string                    `json:"event_date"`
+	TotalAllianceDamage int64                     `json:"total_alliance_damage"`
+	Notes               string                    `json:"notes"`
+	CreatedAt           string                    `json:"created_at"`
+	CreatedByID         *int                      `json:"created_by_id"`
+	ParticipantCount    int                       `json:"participant_count,omitempty"`
+	TopDamageDealer     string                    `json:"top_damage_dealer,omitempty"`
+	TopDamage           int64                     `json:"top_damage,omitempty"`
+	Participants        []MarshalGuardParticipant `json:"participants,omitempty"`
+}
+
+type MarshalGuardParticipant struct {
+	ID           int    `json:"id"`
+	EventID      int    `json:"event_id"`
+	MemberID     *int   `json:"member_id"`
+	MemberName   string `json:"member_name,omitempty"`
+	NameSnapshot string `json:"name_snapshot"`
+	AllianceTag  string `json:"alliance_tag"`
+	RankInEvent  int    `json:"rank_in_event"`
+	Damage       int64  `json:"damage"`
+	AttackCount  *int   `json:"attack_count"`
+}
+
+type MarshalGuardOCRResult struct {
+	EventDate       string             `json:"event_date"`
+	TotalDamage     int64              `json:"total_damage"`
+	Participants    []MGOCRParticipant `json:"participants"`
+	ExistingEventID *int               `json:"existing_event_id,omitempty"`
+}
+
+type MGOCRParticipant struct {
+	RankInEvent  int    `json:"rank_in_event"`
+	NameSnapshot string `json:"name_snapshot"`
+	AllianceTag  string `json:"alliance_tag"`
+	Damage       int64  `json:"damage"`
+	AttackCount  *int   `json:"attack_count"`
+	MemberID     *int   `json:"member_id"`
+	MemberName   string `json:"member_name,omitempty"`
+}
+
+type MGConfirmRequest struct {
+	EventDate        string             `json:"event_date"`
+	TotalDamage      int64              `json:"total_damage"`
+	Notes            string             `json:"notes"`
+	OverwriteEventID *int               `json:"overwrite_event_id,omitempty"`
+	Participants     []MGOCRParticipant `json:"participants"`
+}
+
+type MGMemberStats struct {
+	MemberID    int     `json:"member_id"`
+	MemberName  string  `json:"member_name"`
+	MemberRank  string  `json:"member_rank"`
+	EventCount  int     `json:"event_count"`
+	TotalDamage int64   `json:"total_damage"`
+	AvgRank     float64 `json:"avg_rank"`
+	BestDamage  int64   `json:"best_damage"`
+}
+
+// GET /api/marshal-guard — list events with summary
+func listMarshalGuardEvents(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`
+		SELECT e.id, e.event_date, e.total_alliance_damage, COALESCE(e.notes, ''),
+			e.created_at, e.created_by_id,
+			COUNT(p.id) as participant_count,
+			COALESCE((SELECT p2.name_snapshot FROM marshal_guard_participants p2 WHERE p2.event_id = e.id ORDER BY p2.damage DESC LIMIT 1), '') as top_dealer,
+			COALESCE((SELECT p2.damage FROM marshal_guard_participants p2 WHERE p2.event_id = e.id ORDER BY p2.damage DESC LIMIT 1), 0) as top_damage
+		FROM marshal_guard_events e
+		LEFT JOIN marshal_guard_participants p ON p.event_id = e.id
+		GROUP BY e.id
+		ORDER BY e.event_date DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	events := []MarshalGuardEvent{}
+	for rows.Next() {
+		var ev MarshalGuardEvent
+		var createdByID sql.NullInt64
+		if err := rows.Scan(&ev.ID, &ev.EventDate, &ev.TotalAllianceDamage, &ev.Notes,
+			&ev.CreatedAt, &createdByID, &ev.ParticipantCount, &ev.TopDamageDealer, &ev.TopDamage); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if createdByID.Valid {
+			id := int(createdByID.Int64)
+			ev.CreatedByID = &id
+		}
+		events = append(events, ev)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(events)
+}
+
+// GET /api/marshal-guard/{id} — get event with participants
+func getMarshalGuardEvent(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(mux.Vars(r)["id"])
+
+	var ev MarshalGuardEvent
+	var createdByID sql.NullInt64
+	err := db.QueryRow(`SELECT id, event_date, total_alliance_damage, COALESCE(notes, ''), created_at, created_by_id
+		FROM marshal_guard_events WHERE id = ?`, id).Scan(
+		&ev.ID, &ev.EventDate, &ev.TotalAllianceDamage, &ev.Notes, &ev.CreatedAt, &createdByID)
+	if err != nil {
+		http.Error(w, "Event not found", http.StatusNotFound)
+		return
+	}
+	if createdByID.Valid {
+		cid := int(createdByID.Int64)
+		ev.CreatedByID = &cid
+	}
+
+	rows, err := db.Query(`
+		SELECT p.id, p.event_id, p.member_id, COALESCE(m.name, ''), p.name_snapshot,
+			COALESCE(p.alliance_tag, ''), p.rank_in_event, p.damage, p.attack_count
+		FROM marshal_guard_participants p
+		LEFT JOIN members m ON m.id = p.member_id
+		WHERE p.event_id = ?
+		ORDER BY p.rank_in_event`, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	ev.Participants = []MarshalGuardParticipant{}
+	for rows.Next() {
+		var p MarshalGuardParticipant
+		var memberID sql.NullInt64
+		var attackCount sql.NullInt64
+		if err := rows.Scan(&p.ID, &p.EventID, &memberID, &p.MemberName,
+			&p.NameSnapshot, &p.AllianceTag, &p.RankInEvent, &p.Damage, &attackCount); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if memberID.Valid {
+			mid := int(memberID.Int64)
+			p.MemberID = &mid
+		}
+		if attackCount.Valid {
+			ac := int(attackCount.Int64)
+			p.AttackCount = &ac
+		}
+		ev.Participants = append(ev.Participants, p)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ev)
+}
+
+// POST /api/marshal-guard — create event manually (no OCR)
+func createMarshalGuardEvent(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		EventDate           string `json:"event_date"`
+		TotalAllianceDamage int64  `json:"total_alliance_damage"`
+		Notes               string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.EventDate == "" {
+		http.Error(w, "event_date is required", http.StatusBadRequest)
+		return
+	}
+
+	session, _ := store.Get(r, "session")
+	userID, _ := session.Values["user_id"].(int)
+
+	result, err := db.Exec(`INSERT INTO marshal_guard_events (event_date, total_alliance_damage, notes, created_by_id)
+		VALUES (?, ?, ?, ?)`, req.EventDate, req.TotalAllianceDamage, req.Notes, userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := result.LastInsertId()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "message": "Event created"})
+}
+
+// PUT /api/marshal-guard/{id} — update event metadata
+func updateMarshalGuardEvent(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(mux.Vars(r)["id"])
+	var req struct {
+		EventDate           string `json:"event_date"`
+		TotalAllianceDamage int64  `json:"total_alliance_damage"`
+		Notes               string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err := db.Exec(`UPDATE marshal_guard_events SET event_date = ?, total_alliance_damage = ?, notes = ? WHERE id = ?`,
+		req.EventDate, req.TotalAllianceDamage, req.Notes, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Event updated"})
+}
+
+// DELETE /api/marshal-guard/{id} — delete event + participants (cascade)
+func deleteMarshalGuardEvent(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(mux.Vars(r)["id"])
+	// Enable foreign keys for CASCADE
+	db.Exec("PRAGMA foreign_keys = ON")
+	_, err := db.Exec(`DELETE FROM marshal_guard_events WHERE id = ?`, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Event deleted"})
+}
+
+// PUT /api/marshal-guard/{id}/participants/{pid} — fix single participant
+func updateMarshalGuardParticipant(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pid, _ := strconv.Atoi(vars["pid"])
+	var req struct {
+		MemberID     *int   `json:"member_id"`
+		NameSnapshot string `json:"name_snapshot"`
+		Damage       int64  `json:"damage"`
+		AttackCount  *int   `json:"attack_count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, err := db.Exec(`UPDATE marshal_guard_participants SET member_id = ?, name_snapshot = ?, damage = ?, attack_count = ? WHERE id = ?`,
+		req.MemberID, req.NameSnapshot, req.Damage, req.AttackCount, pid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Participant updated"})
+}
+
+// GET /api/marshal-guard/member-stats — per-member MG stats
+func getMarshalGuardMemberStats(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(`
+		SELECT p.member_id, m.name, m.rank,
+			COUNT(DISTINCT p.event_id) as event_count,
+			COALESCE(SUM(p.damage), 0) as total_damage,
+			COALESCE(AVG(p.rank_in_event), 0) as avg_rank,
+			COALESCE(MAX(p.damage), 0) as best_damage
+		FROM marshal_guard_participants p
+		JOIN members m ON m.id = p.member_id
+		WHERE p.member_id IS NOT NULL
+		GROUP BY p.member_id
+		ORDER BY total_damage DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	stats := []MGMemberStats{}
+	for rows.Next() {
+		var s MGMemberStats
+		if err := rows.Scan(&s.MemberID, &s.MemberName, &s.MemberRank,
+			&s.EventCount, &s.TotalDamage, &s.AvgRank, &s.BestDamage); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		stats = append(stats, s)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// POST /api/marshal-guard/confirm — atomic create event + participants
+func confirmMarshalGuard(w http.ResponseWriter, r *http.Request) {
+	var req MGConfirmRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.EventDate == "" {
+		http.Error(w, "event_date is required", http.StatusBadRequest)
+		return
+	}
+
+	session, _ := store.Get(r, "session")
+	userID, _ := session.Values["user_id"].(int)
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// If overwriting, delete old event first (CASCADE deletes participants)
+	if req.OverwriteEventID != nil {
+		tx.Exec("PRAGMA foreign_keys = ON")
+		if _, err := tx.Exec(`DELETE FROM marshal_guard_events WHERE id = ?`, *req.OverwriteEventID); err != nil {
+			http.Error(w, "Failed to overwrite existing event: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	result, err := tx.Exec(`INSERT INTO marshal_guard_events (event_date, total_alliance_damage, notes, created_by_id) VALUES (?, ?, ?, ?)`,
+		req.EventDate, req.TotalDamage, req.Notes, userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	eventID, _ := result.LastInsertId()
+
+	added := 0
+	for _, p := range req.Participants {
+		_, err := tx.Exec(`INSERT INTO marshal_guard_participants (event_id, member_id, name_snapshot, alliance_tag, rank_in_event, damage, attack_count)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			eventID, p.MemberID, p.NameSnapshot, p.AllianceTag, p.RankInEvent, p.Damage, p.AttackCount)
+		if err != nil {
+			log.Printf("MG confirm: failed to insert participant rank %d: %v", p.RankInEvent, err)
+			continue
+		}
+		added++
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"event_id": eventID,
+		"added":    added,
+		"message":  fmt.Sprintf("Event created with %d participants", added),
+	})
+}
+
+// POST /api/marshal-guard/process-screenshots — OCR parse MG screenshots
+func processMarshalGuardScreenshots(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	files := r.MultipartForm.File["images[]"]
+	if len(files) == 0 {
+		// Try single-file field name
+		files = r.MultipartForm.File["image"]
+	}
+	if len(files) == 0 {
+		http.Error(w, "No images provided", http.StatusBadRequest)
+		return
+	}
+	if len(files) > 10 {
+		http.Error(w, "Maximum 10 images allowed", http.StatusBadRequest)
+		return
+	}
+
+	var allParticipants []MGOCRParticipant
+	var eventDate string
+	var totalDamage int64
+
+	for _, fh := range files {
+		file, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		imageData, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			continue
+		}
+
+		client := gosseract.NewClient()
+		client.SetImageFromBytes(imageData)
+		text, err := client.Text()
+		client.Close()
+		if err != nil {
+			log.Printf("MG OCR error: %v", err)
+			continue
+		}
+
+		result := parseMarshalGuardText(text)
+		if result.EventDate != "" && eventDate == "" {
+			eventDate = result.EventDate
+		}
+		if result.TotalDamage > totalDamage {
+			totalDamage = result.TotalDamage
+		}
+		// Merge participants by rank (higher damage wins)
+		for _, p := range result.Participants {
+			merged := false
+			for i, existing := range allParticipants {
+				if existing.RankInEvent == p.RankInEvent {
+					if p.Damage > existing.Damage {
+						allParticipants[i] = p
+					}
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				allParticipants = append(allParticipants, p)
+			}
+		}
+	}
+
+	// Allow manual event_date override from form field
+	if manualDate := r.FormValue("event_date"); manualDate != "" {
+		eventDate = manualDate
+	}
+
+	// Match participants to members
+	members, err := loadAllMembers()
+	if err == nil {
+		for i := range allParticipants {
+			matchMGParticipant(&allParticipants[i], members)
+		}
+	}
+
+	// Check for existing event on same date
+	var existingEventID *int
+	if eventDate != "" {
+		var eid int
+		err := db.QueryRow(`SELECT id FROM marshal_guard_events WHERE event_date = ?`, eventDate).Scan(&eid)
+		if err == nil {
+			existingEventID = &eid
+		}
+	}
+
+	// Sort by rank
+	sort.Slice(allParticipants, func(i, j int) bool {
+		return allParticipants[i].RankInEvent < allParticipants[j].RankInEvent
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(MarshalGuardOCRResult{
+		EventDate:       eventDate,
+		TotalDamage:     totalDamage,
+		Participants:    allParticipants,
+		ExistingEventID: existingEventID,
+	})
+}
+
+func loadAllMembers() ([]Member, error) {
+	rows, err := db.Query(`SELECT id, name, rank, eligible, nickname FROM members WHERE deleted = 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []Member
+	for rows.Next() {
+		var m Member
+		var nickname sql.NullString
+		if err := rows.Scan(&m.ID, &m.Name, &m.Rank, &m.Eligible, &nickname); err != nil {
+			continue
+		}
+		if nickname.Valid {
+			m.Nickname = &nickname.String
+		}
+		members = append(members, m)
+	}
+	return members, nil
+}
+
+func matchMGParticipant(p *MGOCRParticipant, members []Member) {
+	name := strings.TrimSpace(p.NameSnapshot)
+	if name == "" {
+		return
+	}
+	lower := strings.ToLower(name)
+
+	// Exact name match
+	for _, m := range members {
+		if strings.ToLower(m.Name) == lower {
+			p.MemberID = &m.ID
+			p.MemberName = m.Name
+			return
+		}
+	}
+	// Nickname match
+	for _, m := range members {
+		if m.Nickname != nil && strings.ToLower(*m.Nickname) == lower {
+			p.MemberID = &m.ID
+			p.MemberName = m.Name
+			return
+		}
+	}
+	// Fuzzy match (≥70% similarity)
+	bestScore := 0
+	bestIdx := -1
+	for i, m := range members {
+		sim := calculateSimilarity(name, m.Name)
+		if m.Nickname != nil && *m.Nickname != "" {
+			nickSim := calculateSimilarity(name, *m.Nickname)
+			if nickSim > sim {
+				sim = nickSim
+			}
+		}
+		if sim > bestScore {
+			bestScore = sim
+			bestIdx = i
+		}
+	}
+	if bestScore >= 70 && bestIdx >= 0 {
+		p.MemberID = &members[bestIdx].ID
+		p.MemberName = members[bestIdx].Name
+	}
+}
+
+// parseMarshalGuardText extracts event data from OCR text of a Marshal Guard screenshot
+func parseMarshalGuardText(text string) MarshalGuardOCRResult {
+	var result MarshalGuardOCRResult
+	lines := strings.Split(text, "\n")
+
+	// Extract event date
+	dateRe := regexp.MustCompile(`(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{2}:\d{2}:\d{2}`)
+	for _, line := range lines {
+		if m := dateRe.FindStringSubmatch(line); m != nil {
+			year, _ := strconv.Atoi(m[1])
+			month, _ := strconv.Atoi(m[2])
+			day, _ := strconv.Atoi(m[3])
+			result.EventDate = fmt.Sprintf("%04d-%02d-%02d", year, month, day)
+			break
+		}
+	}
+
+	// Extract total alliance damage
+	totalRe := regexp.MustCompile(`(?i)(?:alliance|total|score)[^\d]*(\d+\.?\d*)\s*([GMK])`)
+	for _, line := range lines {
+		if m := totalRe.FindStringSubmatch(line); m != nil {
+			result.TotalDamage = parseDamageValue(m[1], m[2])
+			break
+		}
+	}
+
+	// Extract participant rows
+	// Pattern: rank or MVP + name + optional [TAG] + damage value
+	tagRe := regexp.MustCompile(`\[([^\]]+)\]`)
+	damageRe := regexp.MustCompile(`(\d+\.?\d*)\s*([GMK])\b`)
+	attackRe := regexp.MustCompile(`(\d+)\s*(?:attack|atk)`)
+	rankLineRe := regexp.MustCompile(`^(?:(?:MVP|No\.\s*(\d+)|\b(\d{1,2})\b))`)
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// Try to extract rank
+		var rank int
+		if strings.Contains(strings.ToUpper(trimmed), "MVP") {
+			rank = 1
+		} else if m := rankLineRe.FindStringSubmatch(trimmed); m != nil {
+			if m[1] != "" {
+				rank, _ = strconv.Atoi(m[1])
+			} else if m[2] != "" {
+				rank, _ = strconv.Atoi(m[2])
+			}
+		}
+		if rank <= 0 {
+			continue
+		}
+
+		// Extract damage
+		var damage int64
+		if m := damageRe.FindStringSubmatch(trimmed); m != nil {
+			damage = parseDamageValue(m[1], m[2])
+		}
+		if damage <= 0 {
+			continue
+		}
+
+		// Extract alliance tag
+		var tag string
+		if m := tagRe.FindStringSubmatch(trimmed); m != nil {
+			tag = m[1]
+		}
+
+		// Extract name: text between rank and damage, minus tag
+		name := extractMGName(trimmed, rank, tag)
+
+		// Extract attack count
+		var attackCount *int
+		if m := attackRe.FindStringSubmatch(trimmed); m != nil {
+			ac, _ := strconv.Atoi(m[1])
+			attackCount = &ac
+		}
+
+		result.Participants = append(result.Participants, MGOCRParticipant{
+			RankInEvent:  rank,
+			NameSnapshot: name,
+			AllianceTag:  tag,
+			Damage:       damage,
+			AttackCount:  attackCount,
+		})
+	}
+
+	return result
+}
+
+func parseDamageValue(numStr, unit string) int64 {
+	val, _ := strconv.ParseFloat(numStr, 64)
+	switch strings.ToUpper(unit) {
+	case "G":
+		return int64(val * 1e9)
+	case "M":
+		return int64(val * 1e6)
+	case "K":
+		return int64(val * 1e3)
+	}
+	return int64(val)
+}
+
+func extractMGName(line string, rank int, tag string) string {
+	// Remove rank prefix (MVP, No.X, or bare number)
+	cleaned := regexp.MustCompile(`^(?:MVP|No\.\s*\d+|\d{1,2})\s*`).ReplaceAllString(strings.TrimSpace(line), "")
+	// Remove tag
+	if tag != "" {
+		cleaned = strings.Replace(cleaned, "["+tag+"]", "", 1)
+	}
+	// Remove damage values and attack counts
+	cleaned = regexp.MustCompile(`\d+\.?\d*\s*[GMK]\b`).ReplaceAllString(cleaned, "")
+	cleaned = regexp.MustCompile(`\d+\s*(?:attack|atk)s?`).ReplaceAllString(cleaned, "")
+	// Clean up whitespace
+	cleaned = strings.TrimSpace(cleaned)
+	// Remove trailing/leading punctuation
+	cleaned = strings.Trim(cleaned, ".,;:- ")
+	return cleaned
+}
+
 func main() {
 	// Initialize session store first
 	initSessionStore()
@@ -8853,6 +9566,17 @@ func main() {
 	router.HandleFunc("/api/power-history", authMiddleware(getPowerHistory)).Methods("GET")
 	router.HandleFunc("/api/power-history", authMiddleware(addPowerRecord)).Methods("POST")
 	router.HandleFunc("/api/power-history/process-screenshot", authMiddleware(processPowerScreenshot)).Methods("POST")
+
+	// Marshal Guard routes (protected)
+	router.HandleFunc("/api/marshal-guard", authMiddleware(listMarshalGuardEvents)).Methods("GET")
+	router.HandleFunc("/api/marshal-guard", authMiddleware(rankManagementMiddleware(createMarshalGuardEvent))).Methods("POST")
+	router.HandleFunc("/api/marshal-guard/process-screenshots", authMiddleware(rankManagementMiddleware(processMarshalGuardScreenshots))).Methods("POST")
+	router.HandleFunc("/api/marshal-guard/confirm", authMiddleware(rankManagementMiddleware(confirmMarshalGuard))).Methods("POST")
+	router.HandleFunc("/api/marshal-guard/member-stats", authMiddleware(getMarshalGuardMemberStats)).Methods("GET")
+	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(getMarshalGuardEvent)).Methods("GET")
+	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(rankManagementMiddleware(updateMarshalGuardEvent))).Methods("PUT")
+	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(rankManagementMiddleware(deleteMarshalGuardEvent))).Methods("DELETE")
+	router.HandleFunc("/api/marshal-guard/{id}/participants/{pid}", authMiddleware(rankManagementMiddleware(updateMarshalGuardParticipant))).Methods("PUT")
 
 	// Health check endpoints (no auth)
 	router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

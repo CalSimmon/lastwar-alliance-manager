@@ -50,6 +50,7 @@
                 <a href="/conduct.html" class="nav-link">📋 Conduct Reports</a>
                 <a href="/rankings.html" class="nav-link">📊 Rankings</a>
                 <a href="/storm.html" class="nav-link">🏜️ Storm</a>
+                <a href="/marshal-guard.html" class="nav-link" id="mg-nav-link">🛡️ Marshal Guard</a>
                 <a href="/vs.html" class="nav-link">⚔️ VS Points</a>
                 <a href="/vs-compliance.html" class="nav-link">📋 VS Compliance</a>
                 <a href="/upload.html" class="nav-link">📸 Upload</a>
@@ -254,6 +255,7 @@
         setActiveLink();
         setActiveDropdownLink();
         mirrorAdminNavLink();
+        applyFeatureGates();
 
         // External toggle (shown only when collapsed) + collapse btn inside nav header
         toggleBtn.addEventListener('click', toggleSidebar);
@@ -294,6 +296,15 @@
             clearTimeout(timeout);
             timeout = setTimeout(later, wait);
         };
+    }
+
+    // Hide feature-gated nav links based on settings
+    function applyFeatureGates() {
+        fetch('/api/settings').then(r => r.ok ? r.json() : null).then(s => {
+            if (!s) return;
+            const mgLink = document.getElementById('mg-nav-link');
+            if (mgLink && s.marshal_guard_enabled === false) mgLink.style.display = 'none';
+        }).catch(() => {});
     }
 
     // Auto-initialize

@@ -236,12 +236,13 @@ function buildRowPair(ranking, index) {
             <td class="rk-col-since">${lastRunHtml}</td>
             <td class="rk-col-awards">${ranking.award_points > 0 ? '+' + ranking.award_points : '<span class="rk-zero">—</span>'}</td>
             <td class="rk-col-recs">${ranking.recommendation_points > 0 ? '+' + ranking.recommendation_points : '<span class="rk-zero">—</span>'}</td>
+            <td class="rk-col-mg">${ranking.mg_event_count > 0 ? ranking.mg_event_count : '<span class="rk-zero">—</span>'}</td>
             <td class="rk-col-expand"><span class="rk-expand-icon">▶</span></td>
         </tr>`;
 
     const detailRow = `
         <tr class="rk-detail-row" id="detail-row-${ranking.member.id}">
-            <td colspan="8"><div class="rk-detail-inner">${buildDetailContent(ranking)}</div></td>
+            <td colspan="9"><div class="rk-detail-inner">${buildDetailContent(ranking)}</div></td>
         </tr>`;
 
     return dataRow + detailRow;

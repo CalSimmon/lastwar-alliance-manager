@@ -150,6 +150,35 @@ document.getElementById('password-form').addEventListener('submit', async (e) =>
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-    await checkAuth();
+    const authData = await checkAuth();
     await setupEventListeners();
+    if (authData && authData.member_id) {
+        loadMGProfileStats(authData.member_id);
+    }
 });
+
+// Load Marshal Guard participation for this member
+async function loadMGProfileStats(memberId) {
+    try {
+        const res = await fetch('/api/marshal-guard/member-stats');
+        if (!res.ok) return;
+        const stats = await res.json();
+        const mine = stats.find(s => s.member_id === memberId);
+        const section = document.getElementById('mg-profile-section');
+        if (!mine) return;
+        section.style.display = '';
+        document.getElementById('mg-profile-stats').innerHTML = `
+            <p><strong>Events Participated:</strong> ${mine.event_count}</p>
+            <p><strong>Total Damage:</strong> ${formatDamage(mine.total_damage)}</p>
+            <p><strong>Average Rank:</strong> ${mine.avg_rank.toFixed(1)}</p>
+            <p><strong>Best Damage:</strong> ${formatDamage(mine.best_damage)}</p>`;
+    } catch (e) { /* silently fail */ }
+}
+
+function formatDamage(val) {
+    if (!val || val === 0) return '0';
+    if (val >= 1e9) return (val / 1e9).toFixed(2) + 'G';
+    if (val >= 1e6) return (val / 1e6).toFixed(2) + 'M';
+    if (val >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+    return val.toString();
+}

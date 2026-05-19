@@ -143,6 +143,10 @@ async function loadSettings() {
         // VIP seat
         const vipSeatEnabled = settings.vip_seat_enabled !== undefined ? settings.vip_seat_enabled : true;
         document.getElementById('vip-seat-enabled').checked = vipSeatEnabled;
+
+        // Marshal Guard
+        const mgEnabled = settings.marshal_guard_enabled !== undefined ? settings.marshal_guard_enabled : true;
+        document.getElementById('marshal-guard-enabled').checked = mgEnabled;
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings.', 'error');
@@ -176,6 +180,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         min_hq_level: parseInt(document.getElementById('min-hq-level').value) || 0,
         power_tracking_enabled: document.getElementById('power-tracking-enabled').checked,
         vip_seat_enabled: document.getElementById('vip-seat-enabled').checked,
+        marshal_guard_enabled: document.getElementById('marshal-guard-enabled').checked,
         server_timezone: document.getElementById('server-timezone').value,
         conductor_time: document.getElementById('conductor-time').value,
         backup_time: document.getElementById('backup-time').value,

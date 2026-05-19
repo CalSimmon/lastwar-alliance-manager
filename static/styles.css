@@ -7299,6 +7299,22 @@ section:last-child {
 #status-modal .modal-content { max-width: 440px; }
 .officer-hint { font-size: 0.8em; color: var(--text-muted); }
 
+/* -- Marshal Guard page -- */
+.mg-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.mg-toolbar h3 { margin: 0; }
+.mg-search { max-width: 280px; }
+.mg-event-row:hover { background: var(--input-bg); }
+.mg-mvp-row { background: rgba(255, 215, 0, 0.08); }
+.modal-tab-content { display: none; }
+.modal-tab-content.active { display: block; }
+
 /* ========================================
    SHARED ACTION BUTTONS ROW
    ======================================== */
