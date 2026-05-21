@@ -6,45 +6,6 @@ let activeWeekIdx = 0;   // 0 = most recent week
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-async function checkAuth() {
-    try {
-        const res = await fetch(`${API_BASE}/check-auth`);
-        if (!res.ok) { window.location.href = '/login.html'; return false; }
-        const data = await res.json();
-        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
-        document.getElementById('username-display').textContent = `👤 ${data.username}`;
-        if (data.is_admin) {
-            const adminLink = document.getElementById('admin-dropdown-link');
-            if (adminLink) adminLink.style.display = 'block';
-        }
-        return data;
-    } catch {
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
-function setupEventListeners() {
-    const usernameDisplay = document.getElementById('username-display');
-    const logoutBtn = document.getElementById('dropdown-logout-btn');
-    if (usernameDisplay) usernameDisplay.addEventListener('click', e => {
-        e.stopPropagation();
-        document.getElementById('user-dropdown-menu')?.classList.toggle('show');
-    });
-    if (logoutBtn) logoutBtn.addEventListener('click', async e => {
-        e.preventDefault();
-        await fetch(`${API_BASE}/logout`, { method: 'POST' });
-        window.location.href = '/login.html';
-    });
-    document.addEventListener('click', e => {
-        const dd = document.getElementById('user-dropdown-menu');
-        const btn = document.getElementById('username-display');
-        if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) dd.classList.remove('show');
-    });
-}
-
 // ── Data load ──────────────────────────────────────────────────────────────────
 
 async function loadCompliance() {
@@ -222,8 +183,7 @@ function escapeHtml(text) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const auth = await checkAuth();
+    const auth = await requireAuth();
     if (!auth) return;
-    setupEventListeners();
     await loadCompliance();
 });

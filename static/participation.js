@@ -8,20 +8,12 @@ let ptSearch = '';
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    const authed = await checkAuth();
+    const authed = await requireAuth();
     if (!authed) return;
 
     await loadData();
     initFilters();
 });
-
-async function checkAuth() {
-    try {
-        const res = await fetch(`${API_BASE}/check-auth`);
-        if (!res.ok) { window.location.href = '/login.html'; return false; }
-        return true;
-    } catch { window.location.href = '/login.html'; return false; }
-}
 
 async function loadData() {
     try {

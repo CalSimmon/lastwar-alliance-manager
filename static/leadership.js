@@ -48,8 +48,14 @@ async function loadDashboard() {
         tiers[rank].push(row);
     });
 
+    // Leadership score = total_score without the recent-conductor penalty
+    // (that penalty is a scheduling fairness tool, not a performance indicator)
+    rankings.forEach(row => {
+        row.ld_score = row.ld_score + (row.recent_conductor_penalty || 0);
+    });
+
     // Alliance-wide score list (for percentile calc)
-    const allScores = rankings.map(r => r.total_score).sort((a, b) => a - b);
+    const allScores = rankings.map(r => r.ld_score).sort((a, b) => a - b);
 
     function overallPercentile(score) {
         const below = allScores.filter(s => s < score).length;
@@ -71,15 +77,15 @@ async function loadDashboard() {
     const promotable = [];
     RANK_ORDER.slice(0, -1).forEach((nextRank, idx) => {
         const currentRank = RANK_ORDER[idx + 1]; // next in array = one below
-        const nextScores = tiers[nextRank].map(r => r.total_score);
+        const nextScores = tiers[nextRank].map(r => r.ld_score);
         const nextMedian = median(nextScores);
         tiers[currentRank].forEach(row => {
-            if (row.total_score > nextMedian) {
+            if (row.ld_score > nextMedian) {
                 promotable.push({ row, currentRank, nextRank, nextMedian });
             }
         });
     });
-    promotable.sort((a, b) => (b.row.total_score - b.nextMedian) - (a.row.total_score - a.nextMedian));
+    promotable.sort((a, b) => (b.row.ld_score - b.nextMedian) - (a.row.ld_score - a.nextMedian));
     renderPromotable(promotable);
     document.getElementById('ld-promote-count').textContent = promotable.length;
 
@@ -89,24 +95,24 @@ async function loadDashboard() {
     const demotable = [];
     ['R3', 'R4', 'R5'].forEach(rank => {
         tiers[rank].forEach(row => {
-            if (row.total_score > p25) return;
+            if (row.ld_score > p25) return;
             const issues = buildIssues(row);
             if (issues.length >= 2) {
-                demotable.push({ row, rank, issues, pct: overallPercentile(row.total_score) });
+                demotable.push({ row, rank, issues, pct: overallPercentile(row.ld_score) });
             }
         });
     });
-    demotable.sort((a, b) => a.row.total_score - b.row.total_score);
+    demotable.sort((a, b) => a.row.ld_score - b.row.ld_score);
     renderDemotable(demotable);
     document.getElementById('ld-demote-count').textContent = demotable.length;
 
     // ── Rising stars ───────────────────────────────────────────────────────
     const rising = [];
     ['R1', 'R2'].forEach(rank => {
-        const tierAvg = avg(tiers[rank].map(r => r.total_score));
+        const tierAvg = avg(tiers[rank].map(r => r.ld_score));
         tiers[rank].forEach(row => {
-            if (row.total_score > tierAvg) {
-                rising.push({ row, rank, tierAvg, aboveBy: row.total_score - tierAvg });
+            if (row.ld_score > tierAvg) {
+                rising.push({ row, rank, tierAvg, aboveBy: row.ld_score - tierAvg });
             }
         });
     });
@@ -148,7 +154,7 @@ function renderPromotable(list) {
     empty.style.display = 'none';
     tbody.closest('table').style.display = '';
     tbody.innerHTML = list.map(({ row, currentRank, nextRank, nextMedian }) => {
-        const gap = row.total_score - nextMedian;
+        const gap = row.ld_score - nextMedian;
         const notes = [];
         if (row.mg_event_count >= 3) notes.push('Active MG');
         if (row.conductor_count >= 2) notes.push('Reliable train');
@@ -156,7 +162,7 @@ function renderPromotable(list) {
         return `<tr>
             <td>${profileLink(row.member)}</td>
             <td>${rankBadgeHtml(currentRank)}</td>
-            <td>${row.total_score}</td>
+            <td>${row.ld_score}</td>
             <td>${Math.round(nextMedian)} <small>(${nextRank} med.)</small></td>
             <td class="pf-pos">+${Math.round(gap)}</td>
             <td>${notes.map(n => `<span class="ld-note-tag">${n}</span>`).join(' ')}</td>
@@ -177,7 +183,7 @@ function renderDemotable(list) {
     tbody.innerHTML = list.map(({ row, rank, issues, pct }) => `<tr class="ld-row-warn">
         <td>${profileLink(row.member)}</td>
         <td>${rankBadgeHtml(rank)}</td>
-        <td>${row.total_score}</td>
+        <td>${row.ld_score}</td>
         <td>${pct}th pct.</td>
         <td>${issueTags(issues)}</td>
     </tr>`).join('');
@@ -196,7 +202,7 @@ function renderRising(list) {
     tbody.innerHTML = list.map(({ row, rank, tierAvg, aboveBy }) => `<tr>
         <td>${profileLink(row.member)}</td>
         <td>${rankBadgeHtml(rank)}</td>
-        <td>${row.total_score}</td>
+        <td>${row.ld_score}</td>
         <td>${Math.round(tierAvg)}</td>
         <td class="pf-pos">+${Math.round(aboveBy)}</td>
     </tr>`).join('');
@@ -222,7 +228,7 @@ function filterFull(rankings) {
         <td>${i + 1}</td>
         <td>${profileLink(row.member)}</td>
         <td>${rankBadgeHtml(row.member.rank)}</td>
-        <td>${row.total_score}</td>
+        <td>${row.ld_score}</td>
         <td>${row.mg_event_count}</td>
         <td>${row.conductor_count}</td>
         <td>${row.recommendation_count}</td>
@@ -263,7 +269,7 @@ function buildScoreBar(tiers) {
     const gridColor  = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
     const barColor   = isDark ? '#63b3ed' : '#3182ce';
     const ranks = RANK_ORDER.filter(r => tiers[r].length);
-    const avgs  = ranks.map(r => Math.round(avg(tiers[r].map(x => x.total_score))));
+    const avgs  = ranks.map(r => Math.round(avg(tiers[r].map(x => x.ld_score))));
     const ctx = document.getElementById('ld-rank-score-bar').getContext('2d');
     if (scoreBarChart) scoreBarChart.destroy();
     scoreBarChart = new Chart(ctx, {
@@ -285,11 +291,9 @@ function buildScoreBar(tiers) {
 
 // ── init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    const res = await fetch(`${API_BASE}/check-auth`);
-    if (!res.ok) { window.location.href = '/login.html'; return; }
-    const authData = await res.json();
+    const authData = await requireAuth();
+    if (!authData) return;
     if (!authData.is_admin) { window.location.href = '/'; return; }
 
-    document.getElementById('username-display').textContent = `👤 ${authData.username}`;
     await loadDashboard();
 });

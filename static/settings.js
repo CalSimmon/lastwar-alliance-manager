@@ -4,95 +4,6 @@ const SETTINGS_URL = `${API_BASE}/settings`;
 let isR5OrAdmin = false;
 let currentTimezones = ["Europe/London"];
 
-// Check authentication
-async function checkAuth() {
-    try {
-        const response = await fetch(`${API_BASE}/check-auth`);
-        if (!response.ok) {
-            window.location.href = '/login.html';
-            return false;
-        }
-        const data = await response.json();
-        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
-        document.getElementById('username-display').textContent = `👤 ${data.username}`;
-        isR5OrAdmin = data.is_r5_or_admin || false;
-        
-        // Disable form if not R5 or admin
-        if (!isR5OrAdmin) {
-            const form = document.getElementById('settings-form');
-            const inputs = form.querySelectorAll('input, textarea, button[type="submit"]');
-            inputs.forEach(input => input.disabled = true);
-            
-            const notice = document.createElement('div');
-            notice.className = 'permission-notice';
-            notice.style.cssText = 'background: var(--bs-warning-bg); border-left: 4px solid var(--bs-warning); padding: 15px; margin-bottom: 20px; color: var(--bs-warning-text);';
-            notice.innerHTML = '<p>ℹ️ Only R5 members and admins can modify settings.</p>';
-            form.parentNode.insertBefore(notice, form);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error('Auth check failed:', error);
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
-// Setup event listeners after auth check
-async function setupEventListeners() {
-    const usernameDisplay = document.getElementById('username-display');
-    const logoutBtn = document.getElementById('dropdown-logout-btn');
-    const adminLink = document.getElementById('admin-dropdown-link');
-    
-    if (usernameDisplay) {
-        usernameDisplay.addEventListener('click', toggleUserDropdown);
-    }
-    
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-    
-    // Check if user is admin to show admin link
-    try {
-        const response = await fetch(`${API_BASE}/check-auth`);
-        const data = await response.json();
-        if (data.is_admin && adminLink) {
-            adminLink.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Error checking admin status:', error);
-    }
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (event) => {
-        const dropdown = document.getElementById('user-dropdown-menu');
-        const usernameBtn = document.getElementById('username-display');
-        if (dropdown && usernameBtn && !usernameBtn.contains(event.target) && !dropdown.contains(event.target)) {
-            dropdown.classList.remove('show');
-        }
-    });
-}
-
-// Toggle user dropdown menu
-function toggleUserDropdown(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) {
-        dropdown.classList.toggle('show');
-    }
-}
-
-// Logout handler
-async function handleLogout(event) {
-    event.preventDefault();
-    try {
-        await fetch(`${API_BASE}/logout`, { method: 'POST' });
-        window.location.href = '/login.html';
-    } catch (error) {
-        console.error('Logout failed:', error);
-    }
-}
-
 // Load settings
 async function loadSettings() {
     try {
@@ -317,12 +228,23 @@ document.getElementById('power-tracking-enabled').addEventListener('change', (e)
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-    const auth = await checkAuth();
-    if (auth) {
-        await setupEventListeners();
-        await loadSettings();
-        await loadBackupRotation();
+    const auth = await requireAuth();
+    if (!auth) return;
+
+    isR5OrAdmin = auth.is_r5_or_admin || false;
+    if (!isR5OrAdmin) {
+        const form = document.getElementById('settings-form');
+        const inputs = form.querySelectorAll('input, textarea, button[type="submit"]');
+        inputs.forEach(input => input.disabled = true);
+        const notice = document.createElement('div');
+        notice.className = 'permission-notice';
+        notice.style.cssText = 'background: var(--bs-warning-bg); border-left: 4px solid var(--bs-warning); padding: 15px; margin-bottom: 20px; color: var(--bs-warning-text);';
+        notice.innerHTML = '<p>ℹ️ Only R5 members and admins can modify settings.</p>';
+        form.parentNode.insertBefore(notice, form);
     }
+
+    await loadSettings();
+    await loadBackupRotation();
 });
 
 // ---- Backup rotation ----

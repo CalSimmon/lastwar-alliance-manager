@@ -3,76 +3,6 @@
 let selectedFiles = []; // Array to hold multiple files
 const MAX_FILES = 25;
 
-// Check authentication
-async function checkAuth() {
-    try {
-        const response = await fetch(`${API_BASE}/check-auth`);
-        const data = await response.json();
-        
-        if (!data.authenticated) {
-            window.location.href = '/login.html';
-            return false;
-        }
-        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
-        
-        document.getElementById('username-display').textContent = `👤 ${data.username}`;
-        return data;
-    } catch (error) {
-        console.error('Auth check failed:', error);
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
-// Setup event listeners after auth check
-async function setupEventListeners(authData) {
-    const usernameDisplay = document.getElementById('username-display');
-    const logoutBtn = document.getElementById('dropdown-logout-btn');
-    const adminLink = document.getElementById('admin-dropdown-link');
-    
-    if (usernameDisplay) {
-        usernameDisplay.addEventListener('click', toggleUserDropdown);
-    }
-    
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-    
-    // Show admin link if user is admin
-    if (authData && authData.is_admin && adminLink) {
-        adminLink.style.display = 'block';
-    }
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (event) => {
-        const dropdown = document.getElementById('user-dropdown-menu');
-        const usernameBtn = document.getElementById('username-display');
-        if (dropdown && usernameBtn && !usernameBtn.contains(event.target) && !dropdown.contains(event.target)) {
-            dropdown.classList.remove('show');
-        }
-    });
-}
-
-// Toggle user dropdown menu
-function toggleUserDropdown(event) {
-    event.stopPropagation();
-    const dropdown = document.getElementById('user-dropdown-menu');
-    if (dropdown) {
-        dropdown.classList.toggle('show');
-    }
-}
-
-// Logout handler
-async function handleLogout(event) {
-    event.preventDefault();
-    try {
-        await fetch(`${API_BASE}/logout`, { method: 'POST' });
-        window.location.href = '/login.html';
-    } catch (error) {
-        console.error('Logout failed:', error);
-    }
-}
-
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -535,10 +465,8 @@ function updateScreenshotTypeHint() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-    const auth = await checkAuth();
+    const auth = await requireAuth();
     if (!auth) return;
-    
-    await setupEventListeners(auth);
     
     // Setup screenshot type selector
     const screenshotTypeSelector = document.getElementById('screenshot-type');

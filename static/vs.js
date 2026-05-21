@@ -18,44 +18,6 @@ let settings        = { vs_points_daily_target: 0, vs_points_weekly_target: 0 };
 let canEdit         = false;   // true for R4/R5/Admin
 let sortBy          = 'total';
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-async function checkAuth() {
-    try {
-        const res = await fetch(`${API_BASE}/check-auth`);
-        if (!res.ok) { window.location.href = '/login.html'; return false; }
-        const data = await res.json();
-        if (!data.authenticated) { window.location.href = '/login.html'; return false; }
-        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
-        document.getElementById('username-display').textContent = `👤 ${data.username}`;
-        if (data.is_admin) {
-            const al = document.getElementById('admin-dropdown-link');
-            if (al) al.style.display = 'block';
-        }
-        canEdit = data.can_manage_ranks || data.is_admin;
-        return data;
-    } catch {
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
-function setupEventListeners() {
-    const btn = document.getElementById('username-display');
-    const logout = document.getElementById('dropdown-logout-btn');
-    if (btn) btn.addEventListener('click', e => { e.stopPropagation(); document.getElementById('user-dropdown-menu')?.classList.toggle('show'); });
-    if (logout) logout.addEventListener('click', async e => {
-        e.preventDefault();
-        await fetch(`${API_BASE}/logout`, { method: 'POST' });
-        window.location.href = '/login.html';
-    });
-    document.addEventListener('click', e => {
-        const dd = document.getElementById('user-dropdown-menu');
-        const b  = document.getElementById('username-display');
-        if (dd && b && !b.contains(e.target) && !dd.contains(e.target)) dd.classList.remove('show');
-    });
-}
-
 // ── Dates ─────────────────────────────────────────────────────────────────────
 
 function getMostRecentMonday(d = new Date()) {
@@ -349,9 +311,9 @@ function escapeHtml(t) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const auth = await checkAuth();
+    const auth = await requireAuth();
     if (!auth) return;
-    setupEventListeners();
+    canEdit = auth.can_manage_ranks || auth.is_admin;
 
     await Promise.all([loadSettings(), loadMembers()]);
     currentWeekDate = getMostRecentMonday();

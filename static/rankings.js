@@ -31,53 +31,6 @@ function saveRankingsOrder(rankings) {
     } catch {}
 }
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
-
-async function checkAuth() {
-    try {
-        const response = await fetch(`${API_BASE}/check-auth`);
-        if (!response.ok) { window.location.href = '/login.html'; return false; }
-        const data = await response.json();
-        if (data.must_change_password) { window.location.href = '/profile.html?must_change_password=1'; return false; }
-        document.getElementById('username-display').textContent = `👤 ${data.username}`;
-        return data;
-    } catch {
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
-function setupEventListeners(authData) {
-    const usernameDisplay = document.getElementById('username-display');
-    const logoutBtn = document.getElementById('dropdown-logout-btn');
-    const adminLink = document.getElementById('admin-dropdown-link');
-
-    if (usernameDisplay) usernameDisplay.addEventListener('click', toggleUserDropdown);
-    if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-    if (authData.is_admin && adminLink) adminLink.style.display = 'block';
-
-    document.addEventListener('click', (e) => {
-        const dropdown = document.getElementById('user-dropdown-menu');
-        const usernameBtn = document.getElementById('username-display');
-        if (dropdown && usernameBtn && !usernameBtn.contains(e.target) && !dropdown.contains(e.target)) {
-            dropdown.classList.remove('show');
-        }
-    });
-}
-
-function toggleUserDropdown(event) {
-    event.stopPropagation();
-    document.getElementById('user-dropdown-menu')?.classList.toggle('show');
-}
-
-async function handleLogout(event) {
-    event.preventDefault();
-    try {
-        await fetch(`${API_BASE}/logout`, { method: 'POST' });
-        window.location.href = '/login.html';
-    } catch { console.error('Logout failed'); }
-}
-
 // ── Data load ─────────────────────────────────────────────────────────────────
 
 async function loadRankings() {
@@ -828,9 +781,8 @@ function debounce(fn, delay) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-    const auth = await checkAuth();
+    const auth = await requireAuth();
     if (!auth) return;
-    setupEventListeners(auth);
     await loadRankings();
 
     document.getElementById('filter-name').addEventListener('input', debounce(applyFiltersAndSort, 300));
