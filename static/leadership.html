@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leadership Dashboard - Last War Alliance</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="branding.js"></script>
+    <script src="toast.js"></script>
+    <script src="common.js"></script>
+    <script src="navigation.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+</head>
+<body data-h1="📈 Last War: Survival" data-subtitle="Alliance health at a glance.">
+    <div class="container">
+        <main>
+
+            <!-- ── Summary cards ─────────────────────────────────────── -->
+            <div class="ld-cards" id="ld-summary-cards">
+                <div class="ld-card">
+                    <div class="ld-card-num" id="ld-total-members">—</div>
+                    <div class="ld-card-lbl">Active Members</div>
+                </div>
+                <div class="ld-card ld-card-promote">
+                    <div class="ld-card-num" id="ld-promote-count">—</div>
+                    <div class="ld-card-lbl">Promotion Candidates</div>
+                </div>
+                <div class="ld-card ld-card-demote">
+                    <div class="ld-card-num" id="ld-demote-count">—</div>
+                    <div class="ld-card-lbl">Demotion Watch</div>
+                </div>
+                <div class="ld-card ld-card-rising">
+                    <div class="ld-card-num" id="ld-rising-count">—</div>
+                    <div class="ld-card-lbl">Rising Stars</div>
+                </div>
+            </div>
+
+            <!-- ── Charts row ─────────────────────────────────────────── -->
+            <div class="ld-charts-row">
+                <div class="ld-chart-card">
+                    <h4>Rank Distribution</h4>
+                    <div class="ld-donut-wrap">
+                        <canvas id="ld-rank-doughnut"></canvas>
+                    </div>
+                </div>
+                <div class="ld-chart-card ld-chart-wide">
+                    <h4>Avg Score by Rank</h4>
+                    <canvas id="ld-rank-score-bar" height="200"></canvas>
+                </div>
+            </div>
+
+            <!-- ── Promotion candidates ───────────────────────────────── -->
+            <div class="ld-section">
+                <h3>🚀 Promotion Candidates</h3>
+                <p class="ld-hint">Members whose score exceeds the median of the next rank up.</p>
+                <div id="ld-promote-table-wrap">
+                    <table class="ld-table">
+                        <thead><tr>
+                            <th>Member</th><th>Rank</th><th>Score</th>
+                            <th>Next-Rank Median</th><th>Gap</th><th>Notes</th>
+                        </tr></thead>
+                        <tbody id="ld-promote-tbody"></tbody>
+                    </table>
+                    <p class="empty" id="ld-promote-empty" style="display:none;">No promotion candidates found.</p>
+                </div>
+            </div>
+
+            <!-- ── Demotion watch ─────────────────────────────────────── -->
+            <div class="ld-section">
+                <h3>⚠️ Demotion Watch</h3>
+                <p class="ld-hint">R3–R5 members in the bottom quartile with 2+ activity gaps.</p>
+                <div id="ld-demote-table-wrap">
+                    <table class="ld-table">
+                        <thead><tr>
+                            <th>Member</th><th>Rank</th><th>Score</th>
+                            <th>Percentile</th><th>Issues</th>
+                        </tr></thead>
+                        <tbody id="ld-demote-tbody"></tbody>
+                    </table>
+                    <p class="empty" id="ld-demote-empty" style="display:none;">No demotion candidates at this time.</p>
+                </div>
+            </div>
+
+            <!-- ── Rising Stars ───────────────────────────────────────── -->
+            <div class="ld-section">
+                <h3>⭐ Rising Stars</h3>
+                <p class="ld-hint">R1–R2 members outperforming their rank tier average.</p>
+                <div id="ld-rising-table-wrap">
+                    <table class="ld-table">
+                        <thead><tr>
+                            <th>Member</th><th>Rank</th><th>Score</th>
+                            <th>Tier Avg</th><th>Above By</th>
+                        </tr></thead>
+                        <tbody id="ld-rising-tbody"></tbody>
+                    </table>
+                    <p class="empty" id="ld-rising-empty" style="display:none;">No rising stars yet.</p>
+                </div>
+            </div>
+
+            <!-- ── Full leaderboard ───────────────────────────────────── -->
+            <div class="ld-section">
+                <h3>📊 Full Score Leaderboard</h3>
+                <div class="ld-toolbar">
+                    <input type="text" id="ld-search" class="rk-search-input" placeholder="🔍 Search...">
+                    <div class="ld-rank-filter">
+                        <label>Rank:</label>
+                        <select id="ld-rank-select">
+                            <option value="">All</option>
+                            <option value="R5">R5</option>
+                            <option value="R4">R4</option>
+                            <option value="R3">R3</option>
+                            <option value="R2">R2</option>
+                            <option value="R1">R1</option>
+                        </select>
+                    </div>
+                </div>
+                <table class="ld-table ld-full-table">
+                    <thead><tr>
+                        <th>#</th><th>Member</th><th>Rank</th>
+                        <th>Score</th><th>MG Events</th><th>Train Runs</th>
+                        <th>Recs</th><th>Awards Pts</th>
+                    </tr></thead>
+                    <tbody id="ld-full-tbody"></tbody>
+                </table>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="leadership.js"></script>
+</body>
+</html>

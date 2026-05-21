@@ -9,48 +9,100 @@
     <script src="toast.js"></script>
     <script src="common.js"></script>
     <script src="navigation.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
 </head>
 <body data-h1="👤 Last War: Survival" data-subtitle="Your personnel file. Mostly accurate.">
     <div class="container">
-
         <main>
-            <section class="form-section">
-                <h3>🔒 Change Access Code</h3>
-                <form id="password-form">
-                    <div class="form-group">
-                        <label for="current-password">Current Password:</label>
-                        <input type="password" id="current-password" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="new-password">New Password:</label>
-                        <input type="password" id="new-password" minlength="6" required>
-                        <span class="help-text">Minimum 6 characters</span>
-                    </div>
-                    <div class="form-group">
-                        <label for="confirm-password">Confirm New Password:</label>
-                        <input type="password" id="confirm-password" minlength="6" required>
-                    </div>
-                    <div class="button-group">
-                        <button type="submit" class="primary-btn">🔒 Change Password</button>
-                    </div>
-                </form>
-            </section>
 
-            <section class="info-section">
-                <h3>ℹ️ Account Information</h3>
-                <div class="info-card">
-                    <p><strong>Username:</strong> <span id="profile-username">-</span></p>
-                    <p><strong>Role:</strong> <span id="profile-role">-</span></p>
-                    <p id="profile-member-info" style="display: none;"><strong>Linked Member:</strong> <span id="profile-member">-</span></p>
-                </div>
-            </section>
+            <!-- ── Member stats (hidden until a member is linked/selected) ── -->
+            <div id="pf-member-section" style="display:none;">
 
-            <section class="info-section" id="mg-profile-section" style="display: none;">
-                <h3>🛡️ Marshal Guard History</h3>
-                <div id="mg-profile-stats" class="info-card">
-                    <p class="empty">Loading...</p>
+                <div class="pf-header">
+                    <div class="pf-identity">
+                        <span class="pf-name" id="pf-name">—</span>
+                        <span class="rank-badge" id="pf-rank-badge">—</span>
+                        <span class="pf-nick" id="pf-nick" style="display:none;"></span>
+                    </div>
+                    <div class="pf-position">
+                        <span id="pf-position-overall" class="pf-pos-badge">—</span>
+                        <span class="pf-pos-sep">·</span>
+                        <span id="pf-position-tier" class="pf-pos-badge pf-pos-tier">—</span>
+                    </div>
                 </div>
-            </section>
+
+                <!-- ── Score breakdown + Radar ───────────────────────────── -->
+                <div class="pf-top-row">
+                    <div class="pf-score-card">
+                        <div class="pf-score-total">
+                            <span class="pf-score-num" id="pf-total-score">—</span>
+                            <span class="pf-score-lbl">Total Score</span>
+                        </div>
+                        <table class="pf-score-table" id="pf-score-table">
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pf-radar-wrap">
+                        <canvas id="pf-radar" width="260" height="260"></canvas>
+                    </div>
+                </div>
+
+                <!-- ── History charts ─────────────────────────────────────── -->
+                <div class="pf-charts-row">
+                    <div class="pf-chart-card" id="pf-mg-chart-card">
+                        <h4>🛡️ Marshal Guard — Damage per Event</h4>
+                        <canvas id="pf-mg-chart" height="160"></canvas>
+                        <p class="pf-no-data" id="pf-mg-nodata" style="display:none;">No MG participation recorded.</p>
+                    </div>
+                    <div class="pf-chart-card" id="pf-vs-chart-card">
+                        <h4>⚔️ VS Points — Weekly</h4>
+                        <canvas id="pf-vs-chart" height="160"></canvas>
+                        <p class="pf-no-data" id="pf-vs-nodata" style="display:none;">No VS data recorded.</p>
+                    </div>
+                </div>
+
+                <!-- ── Train runs ─────────────────────────────────────────── -->
+                <div class="pf-train-section">
+                    <h4>🚂 Recent Train Runs</h4>
+                    <div id="pf-train-list" class="pf-train-list"></div>
+                </div>
+
+            </div>
+
+            <!-- ── Account section (always visible for self) ──────────────── -->
+            <div id="pf-account-section">
+                <section class="info-section">
+                    <h3>ℹ️ Account Information</h3>
+                    <div class="info-card">
+                        <p><strong>Username:</strong> <span id="profile-username">-</span></p>
+                        <p><strong>Role:</strong> <span id="profile-role">-</span></p>
+                        <p id="profile-member-info" style="display: none;"><strong>Linked Member:</strong> <span id="profile-member">-</span></p>
+                    </div>
+                </section>
+
+                <section class="form-section" id="pf-password-section">
+                    <h3>🔒 Change Access Code</h3>
+                    <form id="password-form">
+                        <div class="form-group">
+                            <label for="current-password">Current Password:</label>
+                            <input type="password" id="current-password" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-password">New Password:</label>
+                            <input type="password" id="new-password" minlength="6" required>
+                            <span class="help-text">Minimum 6 characters</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="confirm-password">Confirm New Password:</label>
+                            <input type="password" id="confirm-password" minlength="6" required>
+                        </div>
+                        <div class="button-group">
+                            <button type="submit" class="primary-btn">🔒 Change Password</button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+
         </main>
     </div>
 

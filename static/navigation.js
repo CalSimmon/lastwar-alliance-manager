@@ -59,6 +59,7 @@
                 <a href="/recruit.html" class="nav-link">🎯 Recruit</a>
                 <a href="/admin.html" class="nav-link admin-link" id="admin-nav-link" style="display: none;">🔐 Admin Panel</a>
                 <a href="/graveyard.html" class="nav-link admin-link" id="graveyard-nav-link" style="display: none;">🪦 Graveyard</a>
+                <a href="/leadership.html" class="nav-link admin-link" id="leadership-nav-link" style="display: none;">📈 Leadership</a>
             </div>
         </nav>`;
 
@@ -91,6 +92,8 @@
             navAdminLink.style.display = dropdownAdminLink.style.display;
             const graveyardNavLink = document.getElementById('graveyard-nav-link');
             if (graveyardNavLink) graveyardNavLink.style.display = dropdownAdminLink.style.display;
+            const leadershipNavLink = document.getElementById('leadership-nav-link');
+            if (leadershipNavLink) leadershipNavLink.style.display = dropdownAdminLink.style.display;
         });
         observer.observe(dropdownAdminLink, { attributes: true, attributeFilter: ['style'] });
     }

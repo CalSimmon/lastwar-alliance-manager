@@ -9349,6 +9349,349 @@ func updateMarshalGuardParticipant(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Participant updated"})
 }
 
+// ── Member Profile ────────────────────────────────────────────────────────────
+
+type MemberProfileMGEvent struct {
+	EventDate string `json:"event_date"`
+	Rank      int    `json:"rank"`
+	Damage    int64  `json:"damage"`
+}
+
+type MemberProfileVSWeek struct {
+	WeekDate    string `json:"week_date"`
+	WeekLabel   string `json:"week_label"`
+	WeeklyTotal int    `json:"weekly_total"`
+	WeeklyMet   bool   `json:"weekly_met"`
+}
+
+type MemberProfileTrainRun struct {
+	Date string `json:"date"`
+	Role string `json:"role"` // "conductor" | "backup"
+}
+
+type MemberProfileRankContext struct {
+	TotalMembers int `json:"total_members"`
+	Position     int `json:"position"`     // overall rank position (1 = best)
+	TierMembers  int `json:"tier_members"` // members at same rank
+	TierPosition int `json:"tier_position"`
+}
+
+type MemberProfileResponse struct {
+	Member      interface{}              `json:"member"`
+	Ranking     interface{}              `json:"ranking"`
+	RankContext MemberProfileRankContext `json:"rank_context"`
+	MGEvents    []MemberProfileMGEvent  `json:"mg_events"`
+	VSWeeks     []MemberProfileVSWeek   `json:"vs_weeks"`
+	TrainRuns   []MemberProfileTrainRun `json:"train_runs"`
+	// Radar axes (0.0 – 1.0 relative to alliance max)
+	RadarMG    float64 `json:"radar_mg"`
+	RadarVS    float64 `json:"radar_vs"`
+	RadarTrain float64 `json:"radar_train"`
+	RadarAward float64 `json:"radar_award"`
+	RadarRec   float64 `json:"radar_rec"`
+}
+
+// GET /api/member-profile?id=X  (id optional — defaults to logged-in member)
+func getMemberProfile(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	sessionMemberID, _ := session.Values["member_id"].(int)
+	isAdmin, _ := session.Values["is_admin"].(bool)
+
+	// Resolve target member ID
+	targetID := sessionMemberID
+	if idStr := r.URL.Query().Get("id"); idStr != "" {
+		if n, err := strconv.Atoi(idStr); err == nil {
+			if n != sessionMemberID && !isAdmin {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			targetID = n
+		}
+	}
+	if targetID == 0 {
+		http.Error(w, "No member linked to this account", http.StatusNotFound)
+		return
+	}
+
+	now := getServerTime()
+
+	// ── Basic member info ────────────────────────────────────────────────────
+	type basicMember struct {
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Nickname string `json:"nickname,omitempty"`
+		Rank     string `json:"rank"`
+	}
+	var bm basicMember
+	var nick sql.NullString
+	if err := db.QueryRow(`SELECT id, name, COALESCE(nickname,''), rank FROM members WHERE id=? AND deleted_at IS NULL`,
+		targetID).Scan(&bm.ID, &bm.Name, &nick, &bm.Rank); err != nil {
+		http.Error(w, "Member not found", http.StatusNotFound)
+		return
+	}
+	if nick.Valid {
+		bm.Nickname = nick.String
+	}
+
+	// ── Ranking context — load full rankings ─────────────────────────────────
+	ctx, err := buildRankingContext(now)
+	if err != nil {
+		http.Error(w, "Failed to build ranking context", http.StatusInternalServerError)
+		return
+	}
+
+	// Get all active members + their scores quickly
+	type scoredMember struct {
+		ID    int
+		Rank  string
+		Score int
+	}
+	allRows, _ := db.Query(`SELECT id, rank FROM members WHERE deleted_at IS NULL`)
+	var allMembers []scoredMember
+	if allRows != nil {
+		defer allRows.Close()
+		for allRows.Next() {
+			var sm scoredMember
+			var m Member
+			allRows.Scan(&m.ID, &m.Rank)
+			m.Nickname = nil
+			sm.ID = m.ID
+			sm.Rank = m.Rank
+			sm.Score = calculateMemberScore(m, ctx)
+			allMembers = append(allMembers, sm)
+		}
+	}
+	// Sort descending by score
+	for i := 0; i < len(allMembers); i++ {
+		for j := i + 1; j < len(allMembers); j++ {
+			if allMembers[j].Score > allMembers[i].Score {
+				allMembers[i], allMembers[j] = allMembers[j], allMembers[i]
+			}
+		}
+	}
+	rankCtx := MemberProfileRankContext{TotalMembers: len(allMembers)}
+	for pos, sm := range allMembers {
+		if sm.ID == targetID {
+			rankCtx.Position = pos + 1
+		}
+		if sm.Rank == bm.Rank {
+			rankCtx.TierMembers++
+			if sm.ID == targetID {
+				rankCtx.TierPosition = rankCtx.TierMembers
+			}
+		}
+	}
+
+	// ── Score breakdown for this member ──────────────────────────────────────
+	targetMember := Member{ID: targetID, Rank: bm.Rank}
+	totalScore := calculateMemberScore(targetMember, ctx)
+
+	type scoreBreakdown struct {
+		TotalScore             int     `json:"total_score"`
+		AwardPoints            int     `json:"award_points"`
+		RecommendationPoints   int     `json:"recommendation_points"`
+		RankBoost              int     `json:"rank_boost"`
+		ConductorCount         int     `json:"conductor_count"`
+		RecentPenalty          int     `json:"recent_conductor_penalty"`
+		AboveAvgPenalty        int     `json:"above_average_penalty"`
+		FirstTimerBoost        int     `json:"first_time_conductor_boost"`
+		MGEventCount           int     `json:"mg_event_count"`
+		MGTotalDamage          int64   `json:"mg_total_damage"`
+		DaysSinceLastConductor *int    `json:"days_since_last_conductor"`
+		RecommendationCount    int     `json:"recommendation_count"`
+	}
+	sb := scoreBreakdown{TotalScore: totalScore}
+	sb.AwardPoints = ctx.AwardScoreMap[targetID]
+	sb.RecommendationCount = ctx.RecommendationMap[targetID]
+	if sb.RecommendationCount > 0 {
+		sb.RecommendationPoints = int(math.Round(5.0 + 5.0*math.Sqrt(float64(sb.RecommendationCount))))
+	}
+	if stats, ok := ctx.ConductorStats[targetID]; ok {
+		sb.ConductorCount = stats.Count
+		sb.DaysSinceLastConductor = nil
+		var mostRecent *time.Time
+		if stats.LastDate != nil {
+			if t, err := parseDate(*stats.LastDate); err == nil {
+				mostRecent = &t
+			}
+		}
+		if stats.LastBackupUsed != nil {
+			if t, err := parseDate(*stats.LastBackupUsed); err == nil {
+				if mostRecent == nil || t.After(*mostRecent) {
+					mostRecent = &t
+				}
+			}
+		}
+		if mostRecent != nil {
+			d := int(now.Sub(*mostRecent).Hours() / 24)
+			sb.DaysSinceLastConductor = &d
+			if float64(stats.Count) > ctx.AvgConductorCount {
+				sb.AboveAvgPenalty = ctx.Settings.AboveAverageConductorPenalty
+			}
+			pen := ctx.Settings.RecentConductorPenaltyDays - d
+			if pen > 0 {
+				sb.RecentPenalty = pen
+			}
+		}
+	}
+	if bm.Rank == "R4" || bm.Rank == "R5" {
+		baseBoost := float64(ctx.Settings.R4R5RankBoost)
+		days := 0
+		if sb.DaysSinceLastConductor != nil {
+			days = *sb.DaysSinceLastConductor
+		}
+		sb.RankBoost = int(math.Round(baseBoost * math.Pow(2, float64(days)/7.0)))
+	}
+	if sb.ConductorCount == 0 && sb.AwardPoints+sb.RecommendationPoints > 0 {
+		sb.FirstTimerBoost = ctx.Settings.FirstTimeConductorBoost
+	}
+	db.QueryRow(`SELECT COUNT(DISTINCT event_id), COALESCE(SUM(damage),0)
+		FROM marshal_guard_participants WHERE member_id=?`, targetID).
+		Scan(&sb.MGEventCount, &sb.MGTotalDamage)
+
+	// ── MG event history (last 15) ────────────────────────────────────────────
+	mgEventRows, _ := db.Query(`
+		SELECT e.event_date, p.rank_in_event, COALESCE(p.damage,0)
+		FROM marshal_guard_participants p
+		JOIN marshal_guard_events e ON e.id = p.event_id
+		WHERE p.member_id = ?
+		ORDER BY e.event_date DESC LIMIT 15`, targetID)
+	var mgEvents []MemberProfileMGEvent
+	if mgEventRows != nil {
+		defer mgEventRows.Close()
+		for mgEventRows.Next() {
+			var ev MemberProfileMGEvent
+			mgEventRows.Scan(&ev.EventDate, &ev.Rank, &ev.Damage)
+			mgEvents = append(mgEvents, ev)
+		}
+	}
+	// Reverse to chronological order
+	for i, j := 0, len(mgEvents)-1; i < j; i, j = i+1, j-1 {
+		mgEvents[i], mgEvents[j] = mgEvents[j], mgEvents[i]
+	}
+
+	// ── VS weekly history (last 8 weeks) ──────────────────────────────────────
+	var weeklyTarget int
+	db.QueryRow(`SELECT COALESCE(vs_points_weekly_target,0) FROM settings WHERE id=1`).Scan(&weeklyTarget)
+	vsWeekRows, _ := db.Query(`
+		SELECT week_date,
+			COALESCE(monday,0)+COALESCE(tuesday,0)+COALESCE(wednesday,0)+
+			COALESCE(thursday,0)+COALESCE(friday,0)+COALESCE(saturday,0)
+		FROM vs_points WHERE member_id=?
+		ORDER BY week_date DESC LIMIT 8`, targetID)
+	var vsWeeks []MemberProfileVSWeek
+	if vsWeekRows != nil {
+		defer vsWeekRows.Close()
+		for vsWeekRows.Next() {
+			var vw MemberProfileVSWeek
+			vsWeekRows.Scan(&vw.WeekDate, &vw.WeeklyTotal)
+			vw.WeeklyMet = weeklyTarget > 0 && vw.WeeklyTotal >= weeklyTarget
+			if t, err := time.Parse("2006-01-02", vw.WeekDate); err == nil {
+				vw.WeekLabel = t.Format("Jan 2")
+			}
+			vsWeeks = append(vsWeeks, vw)
+		}
+	}
+	for i, j := 0, len(vsWeeks)-1; i < j; i, j = i+1, j-1 {
+		vsWeeks[i], vsWeeks[j] = vsWeeks[j], vsWeeks[i]
+	}
+
+	// ── Train run history (last 10) ───────────────────────────────────────────
+	trainRows, _ := db.Query(`
+		SELECT date,
+			CASE WHEN actual_conductor_id=? THEN 'sub'
+			     WHEN backup_id=? AND conductor_showed_up=0 AND actual_conductor_id IS NULL THEN 'backup'
+			     ELSE 'conductor' END AS role
+		FROM train_schedules
+		WHERE (conductor_id=? AND (conductor_showed_up=1 OR conductor_showed_up IS NULL))
+		   OR actual_conductor_id=?
+		   OR (backup_id=? AND conductor_showed_up=0 AND actual_conductor_id IS NULL)
+		ORDER BY date DESC LIMIT 10`,
+		targetID, targetID, targetID, targetID, targetID)
+	var trainRuns []MemberProfileTrainRun
+	if trainRows != nil {
+		defer trainRows.Close()
+		for trainRows.Next() {
+			var tr MemberProfileTrainRun
+			trainRows.Scan(&tr.Date, &tr.Role)
+			trainRuns = append(trainRuns, tr)
+		}
+	}
+	for i, j := 0, len(trainRuns)-1; i < j; i, j = i+1, j-1 {
+		trainRuns[i], trainRuns[j] = trainRuns[j], trainRuns[i]
+	}
+
+	// ── Radar scores (0–100) ──────────────────────────────────────────────────
+	// Compute alliance-wide max values for normalisation
+	var maxMGEvents, maxConductors, maxAwards, maxRecs int
+	var totalMGEvents int
+	db.QueryRow(`SELECT COUNT(*) FROM marshal_guard_events`).Scan(&totalMGEvents)
+	db.QueryRow(`SELECT COALESCE(MAX(cnt),1) FROM (SELECT COUNT(DISTINCT event_id) AS cnt FROM marshal_guard_participants WHERE member_id IS NOT NULL GROUP BY member_id)`).Scan(&maxMGEvents)
+	db.QueryRow(`SELECT COALESCE(MAX(c),1) FROM (SELECT COUNT(*) AS c FROM train_schedules WHERE conductor_id IS NOT NULL GROUP BY conductor_id)`).Scan(&maxConductors)
+	for _, pts := range ctx.AwardScoreMap {
+		if pts > maxAwards {
+			maxAwards = pts
+		}
+	}
+	if maxAwards == 0 {
+		maxAwards = 1
+	}
+	for _, cnt := range ctx.RecommendationMap {
+		if cnt > maxRecs {
+			maxRecs = cnt
+		}
+	}
+	if maxRecs == 0 {
+		maxRecs = 1
+	}
+	if maxMGEvents == 0 {
+		maxMGEvents = 1
+	}
+	if maxConductors == 0 {
+		maxConductors = 1
+	}
+
+	radarMG := math.Min(1.0, float64(sb.MGEventCount)/float64(maxMGEvents))
+	// VS: fraction of last 4 weeks met
+	var vsWeeksMet int
+	currentMonday := getMondayOfWeek(now)
+	week4Start := formatDateString(currentMonday.AddDate(0, 0, -21))
+	db.QueryRow(`SELECT COUNT(*) FROM vs_points WHERE member_id=? AND week_date>=? AND
+		COALESCE(monday,0)+COALESCE(tuesday,0)+COALESCE(wednesday,0)+COALESCE(thursday,0)+COALESCE(friday,0)+COALESCE(saturday,0) >= ?`,
+		targetID, week4Start, weeklyTarget).Scan(&vsWeeksMet)
+	radarVS := 0.0
+	if weeklyTarget > 0 {
+		radarVS = float64(vsWeeksMet) / 4.0
+	} else {
+		// no target set: use presence of data as proxy
+		var hasData int
+		db.QueryRow(`SELECT COUNT(*) FROM vs_points WHERE member_id=? AND week_date>=?`, targetID, week4Start).Scan(&hasData)
+		if hasData > 0 {
+			radarVS = math.Min(1.0, float64(hasData)/4.0)
+		}
+	}
+	radarTrain := math.Min(1.0, float64(sb.ConductorCount)/float64(maxConductors))
+	radarAward := math.Min(1.0, float64(sb.AwardPoints)/float64(maxAwards))
+	radarRec := math.Min(1.0, float64(sb.RecommendationCount)/float64(maxRecs))
+
+	resp := MemberProfileResponse{
+		Member:      bm,
+		Ranking:     sb,
+		RankContext: rankCtx,
+		MGEvents:    mgEvents,
+		VSWeeks:     vsWeeks,
+		TrainRuns:   trainRuns,
+		RadarMG:     math.Round(radarMG*100) / 100,
+		RadarVS:     math.Round(radarVS*100) / 100,
+		RadarTrain:  math.Round(radarTrain*100) / 100,
+		RadarAward:  math.Round(radarAward*100) / 100,
+		RadarRec:    math.Round(radarRec*100) / 100,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 // ── Participation Summary ─────────────────────────────────────────────────────
 
 type ParticipationMG struct {
@@ -11938,6 +12281,7 @@ func main() {
 
 	// Rankings routes (protected)
 	router.HandleFunc("/api/rankings", authMiddleware(getMemberRankings)).Methods("GET")
+	router.HandleFunc("/api/member-profile", authMiddleware(getMemberProfile)).Methods("GET")
 	router.HandleFunc("/api/member-timelines", authMiddleware(getMemberTimelines)).Methods("GET")
 
 	// Storm assignments routes (protected, R4/R5 only)
