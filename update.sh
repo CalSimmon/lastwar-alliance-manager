@@ -172,7 +172,7 @@ if [ -f "go.mod" ]; then
 fi
 
 # Build
-sudo -u $APP_USER go build -o alliance-manager main.go
+sudo -u $APP_USER go build -o alliance-manager .
 
 if [ ! -f "alliance-manager" ]; then
     echo -e "${RED}Build failed!${NC}"
