@@ -9123,7 +9123,7 @@ html.theme-dark .pf-train-conductor { background: rgba(99,179,237,.25); color: #
     font-weight: 600;
     color: var(--text-primary, #1a202c);
 }
-.ld-donut-wrap { height: 220px; }
+.ld-donut-wrap { position: relative; height: 220px; }
 .ld-chart-wide { }
 
 /* sections */

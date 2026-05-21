@@ -35,7 +35,8 @@ function profileLink(member) {
 async function loadDashboard() {
     const res = await fetch('/api/rankings');
     if (!res.ok) { showToast('Failed to load rankings', 'error'); return; }
-    const rankings = await res.json();
+    const payload = await res.json();
+    const rankings = Array.isArray(payload) ? payload : (payload.rankings || []);
 
     // Build tier map: rank → [{member, score, mgEvents, conductorCount, …}]
     const tiers = {};
@@ -290,6 +291,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!authData.is_admin) { window.location.href = '/'; return; }
 
     document.getElementById('username-display').textContent = `👤 ${authData.username}`;
-    initNavigation(authData);
     await loadDashboard();
 });

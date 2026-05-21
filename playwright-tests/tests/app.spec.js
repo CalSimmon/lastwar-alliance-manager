@@ -82,7 +82,24 @@ const PAGES = [
   },
   { name: 'Admin', path: '/admin.html', slug: '12-admin', keySelectors: ['main, section, .container'] },
   { name: 'Graveyard', path: '/graveyard.html', slug: '13-graveyard', keySelectors: ['main, section, table'] },
-  { name: 'Profile', path: '/profile.html', slug: '14-profile', keySelectors: ['main, section, .container'] },
+  {
+    name: 'Profile', path: '/profile.html', slug: '14-profile',
+    keySelectors: ['.pf-header, .pf-top-row, main, section, .container'],
+    extraChecks: async (page) => {
+      // Score card and radar canvas should appear once a member is linked
+      const memberSection = page.locator('#pf-member-section');
+      const accountSection = page.locator('#pf-account-section');
+      // At minimum the account section is always present
+      await expect(accountSection).toBeVisible({ timeout: 8000 });
+      // If member linked, member section should be visible
+      const isMemberVisible = await memberSection.isVisible();
+      if (isMemberVisible) {
+        await expect(page.locator('#pf-radar')).toBeVisible();
+        await expect(page.locator('#pf-score-table')).toBeVisible();
+        await expect(page.locator('#pf-total-score')).not.toHaveText('—');
+      }
+    },
+  },
   {
     name: 'Recruit', path: '/recruit.html', slug: '15-recruit',
     keySelectors: ['main, section, .form-section'],
@@ -91,6 +108,43 @@ const PAGES = [
       await expect(page.locator('#applicant-list')).toBeVisible();
       // add button visible because we're logged in as admin (officer)
       await expect(page.locator('#add-applicant-btn')).toBeVisible();
+    },
+  },
+  {
+    name: 'Participation', path: '/participation.html', slug: '16-participation',
+    keySelectors: ['.pt-summary-row, main, .container'],
+    extraChecks: async (page) => {
+      await expect(page.locator('#pt-summary-row')).toBeVisible({ timeout: 8000 });
+      await expect(page.locator('#pt-total')).not.toHaveText('—', { timeout: 10000 });
+      await expect(page.locator('#pt-tbody')).toBeVisible({ timeout: 8000 });
+      // Toolbar controls present
+      await expect(page.locator('#pt-search')).toBeVisible();
+    },
+  },
+  {
+    name: 'Leadership', path: '/leadership.html', slug: '17-leadership',
+    keySelectors: ['.ld-cards, main, .container'],
+    extraChecks: async (page) => {
+      // Admin-only: should not redirect to login
+      expect(page.url()).not.toContain('login.html');
+      await expect(page.locator('#ld-summary-cards')).toBeVisible({ timeout: 8000 });
+      await expect(page.locator('#ld-total-members')).not.toHaveText('—', { timeout: 10000 });
+      // Charts rendered
+      await expect(page.locator('#ld-rank-doughnut')).toBeVisible();
+      await expect(page.locator('#ld-rank-score-bar')).toBeVisible();
+      // Tables or empty messages present
+      const promoteTbody = page.locator('#ld-promote-tbody');
+      const promoteEmpty = page.locator('#ld-promote-empty');
+      const hasRows = await promoteTbody.locator('tr').count() > 0;
+      const hasEmpty = await promoteEmpty.isVisible();
+      expect(hasRows || hasEmpty, 'Promotion section has neither rows nor empty message').toBeTruthy();
+      // Full leaderboard populated
+      await expect(page.locator('#ld-full-tbody tr').first()).toBeVisible({ timeout: 6000 });
+      // Search filter works
+      await page.fill('#ld-search', 'zzzznotexist');
+      await expect(page.locator('#ld-full-tbody tr')).toHaveCount(0);
+      await page.fill('#ld-search', '');
+      await expect(page.locator('#ld-full-tbody tr').first()).toBeVisible();
     },
   },
 ];

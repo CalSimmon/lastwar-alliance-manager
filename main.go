@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata" // embed IANA timezone database so Docker Alpine works
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
@@ -350,8 +351,15 @@ func jsonError(w http.ResponseWriter, msg string, status int) {
 }
 
 // requestLoggingMiddleware logs each HTTP request with method, path, status, and duration.
+// It also recovers from panics so one bad handler cannot crash the whole server.
 func requestLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("PANIC recovered in %s %s: %v", r.Method, r.URL.Path, rec)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+			}
+		}()
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
@@ -9380,9 +9388,9 @@ type MemberProfileResponse struct {
 	Member      interface{}              `json:"member"`
 	Ranking     interface{}              `json:"ranking"`
 	RankContext MemberProfileRankContext `json:"rank_context"`
-	MGEvents    []MemberProfileMGEvent  `json:"mg_events"`
-	VSWeeks     []MemberProfileVSWeek   `json:"vs_weeks"`
-	TrainRuns   []MemberProfileTrainRun `json:"train_runs"`
+	MGEvents    []MemberProfileMGEvent   `json:"mg_events"`
+	VSWeeks     []MemberProfileVSWeek    `json:"vs_weeks"`
+	TrainRuns   []MemberProfileTrainRun  `json:"train_runs"`
 	// Radar axes (0.0 – 1.0 relative to alliance max)
 	RadarMG    float64 `json:"radar_mg"`
 	RadarVS    float64 `json:"radar_vs"`
@@ -9487,18 +9495,18 @@ func getMemberProfile(w http.ResponseWriter, r *http.Request) {
 	totalScore := calculateMemberScore(targetMember, ctx)
 
 	type scoreBreakdown struct {
-		TotalScore             int     `json:"total_score"`
-		AwardPoints            int     `json:"award_points"`
-		RecommendationPoints   int     `json:"recommendation_points"`
-		RankBoost              int     `json:"rank_boost"`
-		ConductorCount         int     `json:"conductor_count"`
-		RecentPenalty          int     `json:"recent_conductor_penalty"`
-		AboveAvgPenalty        int     `json:"above_average_penalty"`
-		FirstTimerBoost        int     `json:"first_time_conductor_boost"`
-		MGEventCount           int     `json:"mg_event_count"`
-		MGTotalDamage          int64   `json:"mg_total_damage"`
-		DaysSinceLastConductor *int    `json:"days_since_last_conductor"`
-		RecommendationCount    int     `json:"recommendation_count"`
+		TotalScore             int   `json:"total_score"`
+		AwardPoints            int   `json:"award_points"`
+		RecommendationPoints   int   `json:"recommendation_points"`
+		RankBoost              int   `json:"rank_boost"`
+		ConductorCount         int   `json:"conductor_count"`
+		RecentPenalty          int   `json:"recent_conductor_penalty"`
+		AboveAvgPenalty        int   `json:"above_average_penalty"`
+		FirstTimerBoost        int   `json:"first_time_conductor_boost"`
+		MGEventCount           int   `json:"mg_event_count"`
+		MGTotalDamage          int64 `json:"mg_total_damage"`
+		DaysSinceLastConductor *int  `json:"days_since_last_conductor"`
+		RecommendationCount    int   `json:"recommendation_count"`
 	}
 	sb := scoreBreakdown{TotalScore: totalScore}
 	sb.AwardPoints = ctx.AwardScoreMap[targetID]
