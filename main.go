@@ -9349,6 +9349,200 @@ func updateMarshalGuardParticipant(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Participant updated"})
 }
 
+// ── Participation Summary ─────────────────────────────────────────────────────
+
+type ParticipationMG struct {
+	TotalEvents  int    `json:"total_events"`
+	RecentEvents int    `json:"recent_events"` // last 60 days
+	TotalDamage  int64  `json:"total_damage"`
+	LastEvent    string `json:"last_event,omitempty"`
+}
+
+type ParticipationVS struct {
+	CurrentWeekTotal int  `json:"current_week_total"`
+	CurrentWeekMet   bool `json:"current_week_met"`
+	WeeksMetLast4    int  `json:"weeks_met_last4"`
+	HasAnyData       bool `json:"has_any_data"`
+}
+
+type ParticipationTrain struct {
+	ConductorCount   int  `json:"conductor_count"`
+	DaysSinceLastRun *int `json:"days_since_last_run"`
+}
+
+type ParticipationMember struct {
+	ID       int                `json:"id"`
+	Name     string             `json:"name"`
+	Nickname string             `json:"nickname,omitempty"`
+	Rank     string             `json:"rank"`
+	MG       ParticipationMG    `json:"mg"`
+	VS       ParticipationVS    `json:"vs"`
+	Train    ParticipationTrain `json:"train"`
+}
+
+// GET /api/participation-summary — combined participation across MG, VS, Train per member
+func getParticipationSummary(w http.ResponseWriter, r *http.Request) {
+	now := getServerTime()
+	cutoff60 := now.AddDate(0, 0, -60).Format("2006-01-02")
+	currentMonday := getMondayOfWeek(now)
+	currentWeekStr := formatDateString(currentMonday)
+	week4Ago := formatDateString(currentMonday.AddDate(0, 0, -21)) // 4 weeks back start
+
+	// ── Active members ───────────────────────────────────────────────────────
+	memberRows, err := db.Query(`SELECT id, name, COALESCE(nickname,''), rank FROM members WHERE deleted_at IS NULL ORDER BY name`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer memberRows.Close()
+
+	type rawMember struct {
+		ID       int
+		Name     string
+		Nickname string
+		Rank     string
+	}
+	var members []rawMember
+	memberIndex := map[int]int{} // id -> slice index
+	for memberRows.Next() {
+		var m rawMember
+		if err := memberRows.Scan(&m.ID, &m.Name, &m.Nickname, &m.Rank); err != nil {
+			continue
+		}
+		memberIndex[m.ID] = len(members)
+		members = append(members, m)
+	}
+	memberRows.Close()
+
+	result := make([]ParticipationMember, len(members))
+	for i, m := range members {
+		result[i].ID = m.ID
+		result[i].Name = m.Name
+		result[i].Nickname = m.Nickname
+		result[i].Rank = m.Rank
+	}
+
+	// ── MG stats ─────────────────────────────────────────────────────────────
+	mgRows, err := db.Query(`
+		SELECT p.member_id,
+			COUNT(DISTINCT p.event_id) AS total_events,
+			COUNT(DISTINCT CASE WHEN e.event_date >= ? THEN p.event_id END) AS recent_events,
+			COALESCE(SUM(p.damage), 0) AS total_damage,
+			MAX(e.event_date) AS last_event
+		FROM marshal_guard_participants p
+		JOIN marshal_guard_events e ON e.id = p.event_id
+		WHERE p.member_id IS NOT NULL
+		GROUP BY p.member_id`, cutoff60)
+	if err == nil {
+		defer mgRows.Close()
+		for mgRows.Next() {
+			var mid, total, recent int
+			var damage int64
+			var lastEvent sql.NullString
+			if mgRows.Scan(&mid, &total, &recent, &damage, &lastEvent) == nil {
+				if idx, ok := memberIndex[mid]; ok {
+					result[idx].MG.TotalEvents = total
+					result[idx].MG.RecentEvents = recent
+					result[idx].MG.TotalDamage = damage
+					if lastEvent.Valid {
+						result[idx].MG.LastEvent = lastEvent.String
+					}
+				}
+			}
+		}
+	}
+
+	// ── VS compliance ────────────────────────────────────────────────────────
+	var weeklyTarget int
+	db.QueryRow(`SELECT COALESCE(vs_points_weekly_target,0) FROM settings WHERE id=1`).Scan(&weeklyTarget)
+
+	vsRows, err := db.Query(`
+		SELECT member_id, week_date,
+			COALESCE(monday,0)+COALESCE(tuesday,0)+COALESCE(wednesday,0)+
+			COALESCE(thursday,0)+COALESCE(friday,0)+COALESCE(saturday,0) AS weekly_total
+		FROM vs_points
+		WHERE week_date >= ?`, week4Ago)
+	if err == nil {
+		defer vsRows.Close()
+		type vsWeek struct {
+			Total    int
+			WeekDate string
+		}
+		memberVS := map[int][]vsWeek{}
+		for vsRows.Next() {
+			var mid int
+			var weekDate string
+			var total int
+			if vsRows.Scan(&mid, &weekDate, &total) == nil {
+				memberVS[mid] = append(memberVS[mid], vsWeek{total, weekDate})
+			}
+		}
+		for mid, weeks := range memberVS {
+			if idx, ok := memberIndex[mid]; ok {
+				result[idx].VS.HasAnyData = true
+				for _, w := range weeks {
+					if w.WeekDate == currentWeekStr {
+						result[idx].VS.CurrentWeekTotal = w.Total
+						result[idx].VS.CurrentWeekMet = weeklyTarget > 0 && w.Total >= weeklyTarget
+					}
+					if weeklyTarget > 0 && w.Total >= weeklyTarget {
+						result[idx].VS.WeeksMetLast4++
+					}
+				}
+			}
+		}
+	}
+
+	// ── Train conductor stats ────────────────────────────────────────────────
+	trainRows, err := db.Query(`
+		SELECT 
+			m.id,
+			COUNT(CASE WHEN (ts.conductor_id = m.id AND (ts.conductor_showed_up = 1 OR ts.conductor_showed_up IS NULL))
+			           OR ts.actual_conductor_id = m.id
+			           OR (ts.backup_id = m.id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+			      THEN 1 END) AS run_count,
+			MAX(CASE WHEN (ts.conductor_id = m.id AND (ts.conductor_showed_up = 1 OR ts.conductor_showed_up IS NULL))
+			         OR ts.actual_conductor_id = m.id
+			         OR (ts.backup_id = m.id AND ts.conductor_showed_up = 0 AND ts.actual_conductor_id IS NULL)
+			    THEN ts.date END) AS last_run
+		FROM members m
+		LEFT JOIN train_schedules ts ON ts.date <= ?
+		WHERE m.deleted_at IS NULL
+		GROUP BY m.id`, now.Format("2006-01-02"))
+	if err == nil {
+		defer trainRows.Close()
+		for trainRows.Next() {
+			var mid, count int
+			var lastRun sql.NullString
+			if trainRows.Scan(&mid, &count, &lastRun) == nil {
+				if idx, ok := memberIndex[mid]; ok {
+					result[idx].Train.ConductorCount = count
+					if lastRun.Valid && lastRun.String != "" {
+						if t, err := time.Parse("2006-01-02", lastRun.String); err == nil {
+							days := int(now.Sub(t).Hours() / 24)
+							result[idx].Train.DaysSinceLastRun = &days
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ── MG event totals for context ───────────────────────────────────────────
+	var totalMGEvents, recentMGEvents int
+	db.QueryRow(`SELECT COUNT(*) FROM marshal_guard_events`).Scan(&totalMGEvents)
+	db.QueryRow(`SELECT COUNT(*) FROM marshal_guard_events WHERE event_date >= ?`, cutoff60).Scan(&recentMGEvents)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"members":          result,
+		"total_mg_events":  totalMGEvents,
+		"recent_mg_events": recentMGEvents,
+		"current_week":     currentWeekStr,
+		"weekly_vs_target": weeklyTarget,
+	})
+}
+
 // GET /api/marshal-guard/member-stats — per-member MG stats
 func getMarshalGuardMemberStats(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
@@ -11763,6 +11957,7 @@ func main() {
 	router.HandleFunc("/api/marshal-guard/process-mg-v2", authMiddleware(r3PlusMiddleware(processMGV2))).Methods("POST")
 	router.HandleFunc("/api/marshal-guard/confirm", authMiddleware(r3PlusMiddleware(confirmMarshalGuard))).Methods("POST")
 	router.HandleFunc("/api/marshal-guard/member-stats", authMiddleware(getMarshalGuardMemberStats)).Methods("GET")
+	router.HandleFunc("/api/participation-summary", authMiddleware(getParticipationSummary)).Methods("GET")
 	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(getMarshalGuardEvent)).Methods("GET")
 	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(rankManagementMiddleware(updateMarshalGuardEvent))).Methods("PUT")
 	router.HandleFunc("/api/marshal-guard/{id}", authMiddleware(rankManagementMiddleware(deleteMarshalGuardEvent))).Methods("DELETE")

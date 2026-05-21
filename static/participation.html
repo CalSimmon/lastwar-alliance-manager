@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Participation Overview - Last War Alliance</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="branding.js"></script>
+    <script src="toast.js"></script>
+    <script src="common.js"></script>
+    <script src="navigation.js"></script>
+</head>
+<body data-h1="📋 Last War: Survival" data-subtitle="Who's showing up. And who isn't.">
+    <div class="container">
+        <main>
+
+            <!-- ── Summary cards ──────────────────────────────── -->
+            <div class="pt-summary-row" id="pt-summary-row">
+                <div class="pt-card pt-card-total">
+                    <div class="pt-card-num" id="pt-total">—</div>
+                    <div class="pt-card-lbl">Active members</div>
+                </div>
+                <div class="pt-card pt-card-absent">
+                    <div class="pt-card-num" id="pt-mg-absent">—</div>
+                    <div class="pt-card-lbl">MG absent (60 days)</div>
+                </div>
+                <div class="pt-card pt-card-warn">
+                    <div class="pt-card-num" id="pt-vs-absent">—</div>
+                    <div class="pt-card-lbl">VS no data this week</div>
+                </div>
+                <div class="pt-card pt-card-info">
+                    <div class="pt-card-num" id="pt-train-zero">—</div>
+                    <div class="pt-card-lbl">Never conducted train</div>
+                </div>
+            </div>
+
+            <!-- ── Filters ────────────────────────────────────── -->
+            <div class="pt-toolbar">
+                <input type="text" id="pt-search" class="rk-search-input" placeholder="🔍 Search members...">
+                <div class="pt-filter-chips">
+                    <button class="filter-chip active" data-filter="all">All</button>
+                    <button class="filter-chip" data-filter="mg-absent">🛡️ MG Absent</button>
+                    <button class="filter-chip" data-filter="vs-absent">⚔️ VS Absent</button>
+                    <button class="filter-chip" data-filter="train-zero">🚂 Never Conducted</button>
+                    <button class="filter-chip" data-filter="any-absent">⚠️ Any Absent</button>
+                </div>
+                <div class="rk-rank-chips" id="pt-rank-chips">
+                    <button class="filter-chip active" data-rank="">All Ranks</button>
+                    <button class="filter-chip" data-rank="R5">R5</button>
+                    <button class="filter-chip" data-rank="R4">R4</button>
+                    <button class="filter-chip" data-rank="R3">R3</button>
+                    <button class="filter-chip" data-rank="R2">R2</button>
+                    <button class="filter-chip" data-rank="R1">R1</button>
+                </div>
+            </div>
+
+            <!-- ── Participation table ────────────────────────── -->
+            <section class="rk-section">
+                <div class="rk-table-wrapper">
+                    <table class="rk-table pt-table">
+                        <thead>
+                            <tr>
+                                <th class="pt-col-name">Member</th>
+                                <th class="pt-col-rank">Rank</th>
+                                <th class="pt-col-mg" title="Marshal Guard events attended in last 60 days / total">🛡️ MG</th>
+                                <th class="pt-col-vs" title="VS points met this week / weeks met in last 4">⚔️ VS</th>
+                                <th class="pt-col-train" title="Train conductor runs / days since last">🚂 Train</th>
+                                <th class="pt-col-status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pt-tbody">
+                            <tr><td colspan="6" class="loading">⏳ Loading participation data…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="participation.js"></script>
+</body>
+</html>
