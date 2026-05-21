@@ -315,7 +315,6 @@ function buildTrainList(runs) {
 document.addEventListener('DOMContentLoaded', async () => {
     const authData = await checkAuth();
     if (!authData) return;
-    initNavigation(authData);
 
     const memberId = getTargetIdFromURL() || authData.member_id;
     if (memberId) await loadMemberProfile(memberId);

@@ -1,7 +1,5 @@
 'use strict';
 
-const API_BASE = '/api';
-
 let ptData = null;       // full API response
 let ptMembers = [];      // flat array after render
 let ptFilter = 'all';
